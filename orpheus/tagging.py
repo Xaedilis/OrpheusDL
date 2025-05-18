@@ -12,6 +12,7 @@ from mutagen.mp4 import MP4Cover
 from mutagen.mp4 import MP4Tags
 from mutagen.oggopus import OggOpus
 from mutagen.oggvorbis import OggVorbis
+from mutagen.oggvorbis import OggVorbisHeaderError
 
 from utils.exceptions import *
 from utils.models import ContainerEnum, TrackInfo
@@ -232,10 +233,24 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
 
     try:
         tagger.save(file_path, v1=2, v2_version=3, v23_sep=None) if container == ContainerEnum.mp3 else tagger.save()
-    except:
-        logging.debug('Tagging failed.')
+    except OggVorbisHeaderError as ogg_header_error:
+        # Check if it's the specific "unable to read full header" error for Ogg Vorbis
+        if "unable to read full header" in str(ogg_header_error).lower():
+            logging.warning(f"Ignoring mutagen OggVorbisHeaderError ('unable to read full header') for {file_path}. File might be okay.")
+            # We pass silently, assuming the file is usable as per your observation.
+            # This prevents TagSavingFailure and the fallback _tags.txt.
+        else:
+            # It's a different OggVorbisHeaderError, so proceed with the original fallback.
+            logging.error(f"Tagging failed for {file_path} with OggVorbisHeaderError: {ogg_header_error}", exc_info=True)
+            tag_text = '\n'.join((f'{k}: {v}' for k, v in asdict(track_info.tags).items() if v and k != 'credits' and k != 'lyrics'))
+            tag_text += '\n\ncredits:\n    ' + '\n    '.join(f'{credit.type}: {", ".join(credit.names)}' for credit in credits_list if credit.names) if credits_list else ''
+            tag_text += '\n\nlyrics:\n    ' + '\n    '.join(embedded_lyrics.split('\n')) if embedded_lyrics else ''
+            open(file_path.rsplit('.', 1)[0] + '_tags.txt', 'w', encoding='utf-8').write(tag_text)
+            raise TagSavingFailure
+    except Exception as e: # Catch other general exceptions from tagger.save()
+        logging.error(f"Generic tagging failed for {file_path}. Error: {e}", exc_info=True) # Log the actual error
         tag_text = '\n'.join((f'{k}: {v}' for k, v in asdict(track_info.tags).items() if v and k != 'credits' and k != 'lyrics'))
         tag_text += '\n\ncredits:\n    ' + '\n    '.join(f'{credit.type}: {", ".join(credit.names)}' for credit in credits_list if credit.names) if credits_list else ''
         tag_text += '\n\nlyrics:\n    ' + '\n    '.join(embedded_lyrics.split('\n')) if embedded_lyrics else ''
         open(file_path.rsplit('.', 1)[0] + '_tags.txt', 'w', encoding='utf-8').write(tag_text)
-        raise TagSavingFailure
+        raise TagSavingFailure # Re-raise TagSavingFailure for other generic errors
