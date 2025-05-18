@@ -31,6 +31,7 @@ def true_current_utc_timestamp():
 class Orpheus:
     def __init__(self, private_mode=False):
         self.extensions, self.extension_list, self.module_list, self.module_settings, self.module_netloc_constants, self.loaded_modules = {}, set(), set(), {}, {}, {}
+        self.gui_handlers = {}
 
         self.default_global_settings = {
             "general": {
@@ -176,6 +177,11 @@ class Orpheus:
         self.module_controls = {'module_list': self.module_list, 'module_settings': self.module_settings,
             'loaded_modules': self.loaded_modules, 'module_loader': self.load_module}
 
+    def register_gui_handler(self, handler_name: str, handler_func):
+        """Registers a GUI handler function for core/module interaction."""
+        self.gui_handlers[handler_name] = handler_func
+        logging.info(f"Registered GUI handler: {handler_name}")
+
     def load_module(self, module: str):
         module = module.lower()
         if module not in self.module_list:
@@ -204,7 +210,8 @@ class Orpheus:
                             resolution = self.settings['global']['covers']['main_resolution'],
                             compression = CoverCompressionEnum[self.settings['global']['covers']['main_compression']]
                         )
-                    )
+                    ),
+                    gui_handlers = self.gui_handlers
                 )
 
                 loaded_module = class_(module_controller)
@@ -360,6 +367,8 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
     os.makedirs('temp', exist_ok=True)
 
     for mainmodule, items in media_to_download.items():
+        total_items_in_batch = len(items)
+        
         for media in items:
             if ModuleModes.download not in orpheus_session.module_settings[mainmodule].module_supported_modes:
                 raise Exception(f'{mainmodule} does not support track downloading') # TODO: replace with ModuleDoesNotSupportAbility
@@ -396,7 +405,11 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                 if mediatype is DownloadTypeEnum.album:
                     downloader.download_album(media_id, extra_kwargs=media.extra_kwargs)
                 elif mediatype is DownloadTypeEnum.track:
-                    downloader.download_track(media_id, extra_kwargs=media.extra_kwargs)
+                    downloader.download_track(
+                        media_id, 
+                        number_of_tracks=total_items_in_batch,
+                        extra_kwargs=media.extra_kwargs
+                    )
                 elif mediatype is DownloadTypeEnum.playlist:
                     downloader.download_playlist(media_id, extra_kwargs=media.extra_kwargs)
                 elif mediatype is DownloadTypeEnum.artist:
