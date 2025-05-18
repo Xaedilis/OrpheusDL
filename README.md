@@ -1,15 +1,15 @@
 <!-- PROJECT INTRO -->
 
-<img src='https://svgshare.com/i/__W.svg' title='Orfi_temporary' height="150">
+<img src='https://github.com/bascurtiz/OrpheusDL/blob/master/icon.svg' title='OrpheusDL icon' height="150">
 
 OrpheusDL
 =========
 
-A modular music archival program
+This fork enables downloading from Spotify
 
-[Report Bug](https://github.com/OrfiTeam/OrpheusDL/issues)
+[Report Bug](https://github.com/bascurtiz/OrpheusDL/issues)
 ·
-[Request Feature](https://github.com/OrfiTeam/OrpheusDL/issues)
+[Request Feature](https://github.com/bascurtiz/OrpheusDL/issues)
 
 
 ## Table of content
@@ -29,7 +29,7 @@ A modular music archival program
 
 <!-- ABOUT ORPHEUS -->
 ## About OrpheusDL
-
+This fork enables downloading from Spotify.
 OrpheusDL is a modular music archival tool written in Python which allows archiving from multiple different services.
 
 
@@ -44,9 +44,11 @@ Follow these steps to get a local copy of Orpheus up and running:
 
 ### Installation
 
+[![Watch how to install](https://i.imgur.com/MvmO3tr.png)](https://youtu.be/AGsYTQuO7nk)
+
 1. Clone the repo
     ```shell
-    git clone https://github.com/OrfiTeam/OrpheusDL.git && cd OrpheusDL
+    git clone https://github.com/bascurtiz/OrpheusDL.git && cd OrpheusDL
     ```
 2. Install all requirements
    ```shell
@@ -229,11 +231,11 @@ selected module
 <!-- Contact -->
 ## Contact
 
-OrfiDev (Project Lead) - [@OrfiDev](https://github.com/OrfiTeam)
+OrfiDev (Project Lead) - [@OrfiDev](https://github.com/OrfiDev)
 
 Dniel97 (Current Lead Developer) - [@Dniel97](https://github.com/Dniel97)
 
-Project Link: [Orpheus Public GitHub Repository](https://github.com/OrfiTeam/OrpheusDL)
+Original Project Link: [Orpheus Public GitHub Repository](https://github.com/OrfiTeam/OrpheusDL)
 
 
 
