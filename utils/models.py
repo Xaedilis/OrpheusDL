@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Flag, auto
 from types import ClassMethodDescriptorType, FunctionType
-from typing import Optional
+from typing import Optional, List, Dict
 
 from utils.utils import read_temporary_setting, set_temporary_setting
 
@@ -241,6 +241,11 @@ class ModuleController:
     get_current_timestamp: FunctionType
     printer_controller: Oprinter
     module_error: ClassMethodDescriptorType  # Will eventually be deprecated *sigh*
+    gui_handlers: Dict = field(default_factory=dict)
+
+    def get_gui_handler(self, handler_name: str):
+        """Retrieves a registered GUI handler function."""
+        return self.gui_handlers.get(handler_name)
 
 
 @dataclass
