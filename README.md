@@ -44,7 +44,7 @@ Follow these steps to get a local copy of Orpheus up and running:
 
 ### Installation
 
-[![Watch how to install](https://i.imgur.com/MvmO3tr.png)](https://youtu.be/AGsYTQuO7nk)
+[![Watch how to install](https://i.imgur.com/ofVjVf9.png)](https://youtu.be/AGsYTQuO7nk)
 
 1. Clone the repo
     ```shell
