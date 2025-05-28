@@ -706,6 +706,19 @@ class Downloader:
                     else:
                         logging.error(f"SoundCloud: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
                         download_info = None # Ensure download_info is None
+                elif service_name_lower == 'jiosaavn':
+                    track_info_obj = kwargs_for_download.get("track_info_obj")
+                    if track_info_obj and hasattr(track_info_obj, 'download_extra_kwargs') and isinstance(track_info_obj.download_extra_kwargs, dict):
+                        file_url = track_info_obj.download_extra_kwargs.get('file_url')
+                        codec = track_info_obj.download_extra_kwargs.get('codec') # Jiosaavn module expects this
+                        if file_url and codec:
+                            download_info: TrackDownloadInfo = self.service.get_track_download(file_url=file_url, codec=codec)
+                        else:
+                            logging.error(f"Jiosaavn: Missing 'file_url' or 'codec' in download_extra_kwargs for track {kwargs_for_download.get('track_id_str')}. Args: {track_info_obj.download_extra_kwargs}")
+                            download_info = None
+                    else:
+                        logging.error(f"Jiosaavn: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
+                        download_info = None
                 else: # For Spotify and other modules that might accept **kwargs or the specific new ones
                     download_info: TrackDownloadInfo = self.service.get_track_download(
                         **kwargs_for_download
