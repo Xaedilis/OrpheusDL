@@ -7,6 +7,7 @@ import json
 from enum import Enum
 import uuid
 import time
+import re
 
 from ffmpeg import Error
 
@@ -909,22 +910,24 @@ class Downloader:
                     stream.output(
                         temp_track_location,
                         acodec=new_codec.name.lower(),
+                        vn=None,  # Ignore video stream
                         **conv_flags,
                         loglevel='error'
                     ).run(capture_stdout=True, capture_stderr=True)
                 except Error as e:
                     error_msg = e.stderr.decode('utf-8')
                     # get the error message from ffmpeg and search foe the non-experimental encoder
-                    encoder = re.search(r"(?<=non experimental encoder ')[^']+", error_msg)
+                    encoder = re.search(r"(?<=non experimental encoder ')\[^'\]+", error_msg)
                     if encoder:
                         self.print(f'Encoder {new_codec.name.lower()} is experimental, trying {encoder.group(0)}')
                         # try to use the non-experimental encoder
                         stream.output(
                             temp_track_location,
                             acodec=encoder.group(0),
+                            vn=None,  # Ignore video stream here as well
                             **conv_flags,
                             loglevel='error'
-                        ).run()
+                        ).run(capture_stdout=True, capture_stderr=True) # Added capture_stdout/stderr for consistency
                     else:
                         # raise any other occurring error
                         raise Exception(f'ffmpeg error converting to {new_codec.name.lower()}:\n{error_msg}')
