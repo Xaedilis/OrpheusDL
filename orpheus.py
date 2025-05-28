@@ -6,6 +6,10 @@ from urllib.parse import urlparse
 
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
+try:
+    from modules.spotify.spotify_api import SpotifyAuthError
+except ModuleNotFoundError:
+    SpotifyAuthError = None  # type: ignore
 
 
 def main():
@@ -112,6 +116,7 @@ def main():
                     
                     query = ' '.join(args.arguments[3:])
                     module = orpheus.load_module(modulename)
+                    print("Searching... Please wait.")
                     items = module.search(query_type, query, limit = (1 if lucky_mode else orpheus.settings['global']['general']['search_limit']))
                     if len(items) == 0:
                         raise Exception(f'No search results for {query_type.name}: {query}')
@@ -163,8 +168,16 @@ def main():
                 exit() # TODO: replace with InvalidInput
         else:  # if no specific modes are detected, parse as urls, but first try loading as a list of URLs
             arguments = tuple(open(args.arguments[0], 'r')) if len(args.arguments) == 1 and os.path.exists(args.arguments[0]) else args.arguments
+            # Strip whitespace from lines read from file
+            if isinstance(arguments, tuple) and len(args.arguments) == 1 and os.path.exists(args.arguments[0]):
+                arguments = tuple(line.strip() for line in arguments if line.strip()) # Also filter out empty lines
+            
             media_to_download = {}
             for link in arguments:
+                link = link.strip() # Ensure individual link is also stripped if coming from args
+                if not link: # Skip empty lines that might still be present if not from file
+                    continue
+
                 if link.startswith('http'):
                     url = urlparse(link)
                     components = url.path.split('/')
@@ -226,3 +239,16 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print('\n\t^C pressed - abort')
         exit()
+    # Specific handling for SpotifyAuthError, only if it was successfully imported
+    except Exception as e:
+        if SpotifyAuthError is not None and isinstance(e, SpotifyAuthError):
+            print(f'\nSpotify Authentication Error: {e}')
+            print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')
+            exit(1) # Exit with a non-zero code to indicate an error
+        # Catch-all for other exceptions
+        # For general exceptions, print the traceback if it's useful for debugging.
+        # For a cleaner user experience for non-dev users, you might choose to print a simpler message.
+        # For now, let's keep the traceback for general errors.
+        import traceback
+        print("\nAn unexpected error occurred:")
+        traceback.print_exc()

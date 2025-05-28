@@ -67,6 +67,7 @@ class SearchResult:
     year: Optional[str] = None
     explicit: Optional[bool] = False
     duration: Optional[int] = None  # Duration in whole seconds
+    image_url: Optional[str] = None
     additional: Optional[list] = None
     extra_kwargs: Optional[dict] = field(default_factory=dict)
 
@@ -297,6 +298,7 @@ class AlbumInfo:
     duration: Optional[int] = None  # Duration in whole seconds
     explicit: Optional[bool] = False
     artist_id: Optional[str] = None
+    id: Optional[str] = None # Spotify Album ID
     quality: Optional[str] = None
     booklet_url: Optional[str] = None
     cover_url: Optional[str] = None
@@ -323,6 +325,9 @@ class PlaylistInfo:
     creator: str
     tracks: list
     release_year: int
+    id: Optional[str] = None
+    num_tracks: Optional[int] = None
+    num_tracks_from_api: Optional[int] = None
     duration: Optional[int] = None  # Duration in whole seconds
     explicit: Optional[bool] = False
     creator_id: Optional[str] = None
@@ -346,6 +351,8 @@ class TrackInfo:
     duration: Optional[int] = None  # Duration in whole seconds
     explicit: Optional[bool] = None
     artist_id: Optional[str] = None
+    id: Optional[str] = None  # Spotify base62 ID
+    gid_hex: Optional[str] = None # Spotify GID hex
     animated_cover_url: Optional[str] = None
     description: Optional[str] = None
     bit_depth: Optional[int] = 16

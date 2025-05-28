@@ -203,9 +203,12 @@ class Downloader:
                 self.set_indent_number(2)
                 print() # Add spacing between track attempts
                 self.print(f'Track {index}/{number_of_tracks} (Pass 1)', drop_level=1)
-                # Pass the whole track_id_or_info (could be TrackInfo obj from get_playlist_info)
+                
+                # Determine the actual track ID string to use for download_track
+                actual_track_id_str_for_download = track_id_or_info.id if isinstance(track_id_or_info, TrackInfo) else str(track_id_or_info)
+                
                 download_result = self.download_track(
-                    track_id_or_info, 
+                    actual_track_id_str_for_download, 
                     album_location=playlist_path, 
                     track_index=index, 
                     number_of_tracks=number_of_tracks, 
@@ -214,18 +217,13 @@ class Downloader:
                     extra_kwargs=playlist_info.track_extra_kwargs
                 )
                 
-                # Check for rate limit signal
                 if download_result == "RATE_LIMITED":
-                    # Store the ID and kwargs needed for retry
-                    logging.info(f"Deferring track {track_id_or_info} due to rate limit.")
-                    # Ensure we store the actual ID string if track_id_or_info is an object
-                    actual_track_id_str = track_id_or_info.download_extra_kwargs.get('track_id') if hasattr(track_id_or_info, 'download_extra_kwargs') else str(track_id_or_info)
+                    logging.info(f"Deferring track {actual_track_id_str_for_download} due to rate limit.")
                     rate_limited_tracks.append({
-                        'id': actual_track_id_str,
+                        'id': actual_track_id_str_for_download, # Store the string ID
                         'extra_kwargs': playlist_info.track_extra_kwargs,
-                        'original_index': index # Store original index for logging
+                        'original_index': index
                     })
-                    # Skip adding to m3u for now
                 elif m3u_playlist_path: # Add to M3U only if download didn't fail/get deferred
                     # Need to get track_info again or ensure download_track provides location
                     # This part needs refinement - how to get track_location if download succeeds?
@@ -241,12 +239,11 @@ class Downloader:
                 self.set_indent_number(2)
                 print() # Spacing
                 self.print(f'Track {retry_item["original_index"]}/{number_of_tracks} (Retry Pass)', drop_level=1)
-                # Retry download - don't handle rate limit again in this pass
-                # If it fails again here, it's just considered failed.
+                # retry_item['id'] is already a string ID
                 self.download_track(
                     retry_item['id'],
                     album_location=playlist_path, 
-                    track_index=retry_item["original_index"], # Use original index for context
+                    track_index=retry_item["original_index"],
                     number_of_tracks=number_of_tracks, 
                     indent_level=2, 
                     m3u_playlist=m3u_playlist_path, # Pass M3U path again
@@ -367,17 +364,20 @@ class Downloader:
             # Download booklet, animated album cover and album cover if present
             self._download_album_files(album_path, album_info)
 
-            for index, track_id in enumerate(album_info.tracks, start=1):
+            for index, track_item in enumerate(album_info.tracks, start=1):
                 self.set_indent_number(indent_level + 1)
                 print()
                 self.print(f'Track {index}/{number_of_tracks}', drop_level=1)
-                self.download_track(track_id, album_location=album_path, track_index=index, number_of_tracks=number_of_tracks, main_artist=artist_name, cover_temp_location=cover_temp_location, indent_level=indent_level+1, extra_kwargs=album_info.track_extra_kwargs)
+                track_id_to_download = track_item.id if hasattr(track_item, 'id') else track_item # Check for .id attribute
+                self.download_track(track_id_to_download, album_location=album_path, track_index=index, number_of_tracks=number_of_tracks, main_artist=artist_name, cover_temp_location=cover_temp_location, indent_level=indent_level+1, extra_kwargs=album_info.track_extra_kwargs)
 
             self.set_indent_number(indent_level)
             self.print(f'=== Album {album_info.name} downloaded ===', drop_level=1)
             if cover_temp_location: silentremove(cover_temp_location)
         elif number_of_tracks == 1:
-            self.download_track(album_info.tracks[0], album_location=path, number_of_tracks=1, main_artist=artist_name, indent_level=indent_level, extra_kwargs=album_info.track_extra_kwargs)
+            single_track_item = album_info.tracks[0]
+            track_id_to_download = single_track_item.id if hasattr(single_track_item, 'id') else single_track_item # Check for .id attribute
+            self.download_track(track_id_to_download, album_location=path, number_of_tracks=1, main_artist=artist_name, indent_level=indent_level, extra_kwargs=album_info.track_extra_kwargs)
 
         return album_info.tracks
 
@@ -435,10 +435,31 @@ class Downloader:
 
         self.set_indent_number(2)
         tracks_downloaded = []
-        for index, album_id in enumerate(artist_info.albums, start=1):
+        for index, album_item in enumerate(artist_info.albums, start=1):
             print()
             self.print(f'Album {index}/{number_of_albums}', drop_level=1)
-            tracks_downloaded += self.download_album(album_id, artist_name=artist_name, path=artist_path, indent_level=2, extra_kwargs=artist_info.album_extra_kwargs)
+
+            album_id_to_process = None
+            # Check if album_item is a string (like for Tidal)
+            if isinstance(album_item, str):
+                album_id_to_process = album_item
+            # Check if album_item is a dictionary with an 'id' key (like for Spotify)
+            elif isinstance(album_item, dict) and 'id' in album_item and isinstance(album_item['id'], str):
+                album_id_to_process = album_item['id']
+            # Check if album_item is an object with an 'id' attribute (more generic)
+            elif hasattr(album_item, 'id') and isinstance(getattr(album_item, 'id', None), str):
+                 album_id_to_process = album_item.id # type: ignore
+            else:
+                self.print(f"Skipping unrecognized album item in artist_info.albums: {album_item}", drop_level=1)
+                continue
+            
+            tracks_downloaded += self.download_album(
+                album_id_to_process, # This is now guaranteed to be a string ID
+                artist_name=artist_name,
+                path=artist_path,
+                indent_level=2,
+                extra_kwargs=artist_info.album_extra_kwargs # General extra_kwargs from artist level
+            )
 
         self.set_indent_number(2)
         skip_tracks = self.global_settings['artist_downloading']['separate_tracks_skip_downloaded']
@@ -460,7 +481,12 @@ class Downloader:
             spatial_codecs = self.global_settings['codecs']['spatial_codecs'],
             proprietary_codecs = self.global_settings['codecs']['proprietary_codecs'],
         )
-        track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **extra_kwargs)
+        
+        # Conditional call to get_track_info based on service
+        if self.service_name.lower() == 'tidal':
+            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, data=extra_kwargs)
+        else:
+            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **extra_kwargs)
         
         if track_info is None:
             # Determine the simple string ID from the input argument
@@ -583,7 +609,108 @@ class Downloader:
         download_info = None
         for attempt in range(max_retries):
             try:
-                download_info: TrackDownloadInfo = self.service.get_track_download(**track_info.download_extra_kwargs)
+                id_to_pass_to_module = actual_id_str
+                if self.service_name.lower() == 'spotify':
+                    if hasattr(track_info, 'gid_hex') and track_info.gid_hex:
+                        id_to_pass_to_module = track_info.gid_hex
+                    else:
+                        # This case should ideally not be hit if get_track_info populates gid_hex correctly
+                        self.oprinter.oprint(f"Warning: Spotify track_info for {actual_id_str} is missing gid_hex. Attempting to use original ID. Download may fail.", drop_level=1)
+                        # If gid_hex is critical and missing, an error might be preferable here
+                        # For now, it will proceed with actual_id_str which might be Base62
+
+                kwargs_for_download = {
+                    "track_id_str": id_to_pass_to_module, # Use the potentially adjusted ID
+                    "track_info_obj": track_info, # The full TrackInfo object
+                    "quality_tier": quality_tier,
+                    "codec_options": codec_options,
+                    **extra_kwargs, # from download_track's parameters
+                    **track_info.download_extra_kwargs # from track_info itself
+                }
+
+                service_name_lower = self.service_name.lower()
+                if service_name_lower == 'tidal':
+                    tidal_args = {}
+                    if 'file_url' in kwargs_for_download:
+                        tidal_args['file_url'] = kwargs_for_download['file_url']
+                    if 'audio_track' in kwargs_for_download:
+                        tidal_args['audio_track'] = kwargs_for_download['audio_track']
+                    # Tidal might also need quality_tier, ensure it's passed if its interface uses it.
+                    # For now, assuming only file_url or audio_track as per previous fixes.
+                    download_info: TrackDownloadInfo = self.service.get_track_download(**tidal_args)
+                elif service_name_lower in ('beatport', 'beatsource'):
+                    # Beatport and Beatsource expect track_id and quality_tier positionally or as named args
+                    download_info: TrackDownloadInfo = self.service.get_track_download(
+                        track_id=kwargs_for_download["track_id_str"],
+                        quality_tier=kwargs_for_download["quality_tier"]
+                    )
+                elif service_name_lower == 'deezer':
+                    # Deezer expects id, track_token, track_token_expiry, format
+                    # These are in track_info_obj.download_extra_kwargs
+                    track_info_obj = kwargs_for_download.get("track_info_obj")
+                    if track_info_obj and hasattr(track_info_obj, 'download_extra_kwargs') and isinstance(track_info_obj.download_extra_kwargs, dict):
+                        deezer_args = track_info_obj.download_extra_kwargs
+                        # Ensure all required keys are present before calling
+                        if all(k in deezer_args for k in ['id', 'track_token', 'track_token_expiry', 'format']):
+                            download_info: TrackDownloadInfo = self.service.get_track_download(
+                                id=deezer_args['id'],
+                                track_token=deezer_args['track_token'],
+                                track_token_expiry=deezer_args['track_token_expiry'],
+                                format=deezer_args['format']
+                            )
+                        else:
+                            logging.error(f"Deezer: Missing required arguments in download_extra_kwargs for track {kwargs_for_download.get('track_id_str')}. Args: {deezer_args}")
+                            download_info = None # Ensure download_info is None if call fails
+                    else:
+                        logging.error(f"Deezer: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
+                        download_info = None # Ensure download_info is None
+                elif service_name_lower == 'qobuz':
+                    # Qobuz expects only the 'url'
+                    track_info_obj = kwargs_for_download.get("track_info_obj")
+                    if track_info_obj and hasattr(track_info_obj, 'download_extra_kwargs') and isinstance(track_info_obj.download_extra_kwargs, dict):
+                        qobuz_dl_url = track_info_obj.download_extra_kwargs.get('url')
+                        if qobuz_dl_url:
+                            download_info: TrackDownloadInfo = self.service.get_track_download(url=qobuz_dl_url)
+                        else:
+                            logging.error(f"Qobuz: Missing 'url' in download_extra_kwargs for track {kwargs_for_download.get('track_id_str')}. Args: {track_info_obj.download_extra_kwargs}")
+                            download_info = None
+                    else:
+                        logging.error(f"Qobuz: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
+                        download_info = None
+                elif service_name_lower == 'soundcloud':
+                    # SoundCloud expects track_url, download_url, codec, track_authorization
+                    track_info_obj = kwargs_for_download.get("track_info_obj")
+                    if track_info_obj and hasattr(track_info_obj, 'download_extra_kwargs') and isinstance(track_info_obj.download_extra_kwargs, dict):
+                        soundcloud_args = track_info_obj.download_extra_kwargs
+                        # Ensure all required keys are present before calling
+                        required_soundcloud_keys = ['track_url', 'download_url', 'codec', 'track_authorization']
+                        if all(k in soundcloud_args for k in required_soundcloud_keys):
+                            download_info: TrackDownloadInfo = self.service.get_track_download(
+                                track_url=soundcloud_args['track_url'],
+                                download_url=soundcloud_args['download_url'],
+                                codec=soundcloud_args['codec'],
+                                track_authorization=soundcloud_args['track_authorization']
+                            )
+                        else:
+                            # It's possible that download_url is None for streamable tracks, module should handle it
+                            if all(k in soundcloud_args for k in ['track_url', 'codec', 'track_authorization']):
+                                download_info: TrackDownloadInfo = self.service.get_track_download(
+                                    track_url=soundcloud_args['track_url'],
+                                    download_url=soundcloud_args.get('download_url'), # Can be None
+                                    codec=soundcloud_args['codec'],
+                                    track_authorization=soundcloud_args['track_authorization']
+                                )
+                            else:
+                                logging.error(f"SoundCloud: Missing required arguments in download_extra_kwargs for track {kwargs_for_download.get('track_id_str')}. Args: {soundcloud_args}")
+                                download_info = None # Ensure download_info is None if call fails
+                    else:
+                        logging.error(f"SoundCloud: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
+                        download_info = None # Ensure download_info is None
+                else: # For Spotify and other modules that might accept **kwargs or the specific new ones
+                    download_info: TrackDownloadInfo = self.service.get_track_download(
+                        **kwargs_for_download
+                    )
+
                 if download_info is not None:
                     break
                 else:
