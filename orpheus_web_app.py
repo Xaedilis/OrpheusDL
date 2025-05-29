@@ -1,28 +1,21 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
-import json
+
+# Import our custom modules
 from OrpheusManager import OrpheusManager
+from job_manager import job_manager, JobType, JobStatus
 
-app = FastAPI(title="Orpheus Web Interface")
+# Initialize FastAPI app
+app = FastAPI(title="Orpheus Music Downloader API", version="1.0.0")
 
-# Enable CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Initialize Orpheus Manager
+# Initialize OrpheusManager
 orpheus_manager = OrpheusManager()
 
 
+# Pydantic models for request/response validation
 class AuthRequest(BaseModel):
     platform: str
     username: str
@@ -31,690 +24,604 @@ class AuthRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    platforms: List[str] = ["tidal"]
-    limit: Optional[int] = 20
-    page: Optional[int] = 1
-    group_by_album: Optional[bool] = False
-    username: Optional[str] = None
-    password: Optional[str] = None
+    platforms: List[str]
+    limit: int = 20
+    page: int = 1
+    group_by_album: bool = False
+    username: str
+    password: str
 
 
 class AlbumSearchRequest(BaseModel):
     query: str
-    platforms: List[str] = ["tidal"]
-    limit: Optional[int] = 10
-    username: Optional[str] = None
-    password: Optional[str] = None
+    platforms: List[str]
+    limit: int = 10
+    username: str
+    password: str
+
+
+class AlbumTracksRequest(BaseModel):
+    album_id: str
+    platform: str
+    username: str
+    password: str
 
 
 class DownloadRequest(BaseModel):
     url: str
     platform: str
-    type: str  # 'track' or 'album'
+    type: str
 
 
-@app.get("/")
+class MultiFormatDownloadRequest(BaseModel):
+    url: str
+    platform: str
+    type: str  # "track" or "album"
+    formats: List[str] = ["configured"]  # Placeholder - formats come from config
+    user_id: Optional[str] = None
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+
+
+# Root endpoint with basic HTML interface
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    html_content = """
+    """Root endpoint with a simple HTML interface for testing"""
+    return HTMLResponse(content="""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Orpheus Web Interface</title>
+        <title>Orpheus Music Downloader</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 40px; }
             .container { max-width: 1200px; margin: 0 auto; }
-            .search-box { margin: 20px 0; }
-            .search-box input { padding: 10px; width: 300px; margin-right: 10px; }
-            .search-box button { padding: 10px 20px; }
-            .controls { margin: 20px 0; }
-            .controls label { margin-right: 15px; }
+            .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+            .form-group { margin: 15px 0; }
+            label { display: block; margin-bottom: 5px; font-weight: bold; }
+            input, select, button { padding: 8px; margin: 5px; }
+            input[type="text"], input[type="password"], select { width: 300px; }
+            button { background-color: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 3px; }
+            button:hover { background-color: #0056b3; }
+            button:disabled { background-color: #6c757d; cursor: not-allowed; }
             .results { margin-top: 20px; }
-            .track { 
-                border: 1px solid #ddd; 
-                padding: 15px; 
-                margin: 10px 0; 
-                border-radius: 5px;
-                background: #f9f9f9;
-            }
-            .album-group {
-                border: 2px solid #007bff;
-                margin: 20px 0;
-                border-radius: 8px;
-                background: #f8f9fa;
-            }
-            .album-header {
-                background: #007bff;
-                color: white;
-                padding: 15px;
-                font-weight: bold;
-                border-radius: 6px 6px 0 0;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .album-tracks {
-                padding: 10px;
-            }
-            .singles-section {
-                border: 2px solid #28a745;
-                margin: 20px 0;
-                border-radius: 8px;
-                background: #f8fff8;
-            }
-            .singles-header {
-                background: #28a745;
-                color: white;
-                padding: 15px;
-                font-weight: bold;
-                border-radius: 6px 6px 0 0;
-            }
-            .album-result {
-                border: 2px solid #6f42c1;
-                margin: 20px 0;
-                border-radius: 8px;
-                background: #f8f9ff;
-            }
-            .album-result-header {
-                background: #6f42c1;
-                color: white;
-                padding: 15px;
-                font-weight: bold;
-                border-radius: 6px 6px 0 0;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .album-result-info {
-                background: #e9ecef;
-                padding: 10px 15px;
-                font-size: 0.9em;
-                color: #495057;
-            }
-            .tracklist {
-                padding: 15px;
-            }
-            .tracklist-item {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 8px 10px;
-                margin: 5px 0;
-                background: white;
-                border-radius: 4px;
-                border-left: 3px solid #6f42c1;
-            }
-            .tracklist-item:hover {
-                background: #f8f9fa;
-            }
-            .track-number {
-                width: 30px;
-                font-weight: bold;
-                color: #6c757d;
-            }
-            .track-info {
-                flex: 1;
-                margin-left: 10px;
-            }
-            .track-name {
-                font-weight: 500;
-                color: #212529;
-            }
-            .track-artist {
-                font-size: 0.85em;
-                color: #6c757d;
-            }
-            .track-duration {
-                color: #6c757d;
-                font-size: 0.85em;
-                margin-right: 10px;
-            }
-            .pagination {
-                margin: 20px 0;
-                text-align: center;
-            }
-            .pagination button {
-                margin: 0 5px;
-                padding: 8px 16px;
-                border: 1px solid #dee2e6;
-                background: white;
-                cursor: pointer;
-                border-radius: 4px;
-            }
-            .pagination button:hover {
-                background: #f8f9fa;
-            }
-            .pagination .current {
-                background: #007bff;
-                color: white;
-                border-color: #007bff;
-            }
-            .pagination .current:hover {
-                background: #0056b3;
-            }
-            .track-quality { 
-                background: #007bff; 
-                color: white; 
-                padding: 2px 6px; 
-                border-radius: 3px; 
-                font-size: 0.8em; 
-            }
-            .explicit { 
-                background: #dc3545; 
-                color: white; 
-                padding: 2px 6px; 
-                border-radius: 3px; 
-                font-size: 0.8em; 
-                margin-left: 5px;
-            }
-            .debug { 
-                background: #f8f9fa; 
-                border: 1px solid #dee2e6; 
-                padding: 10px; 
-                margin: 10px 0; 
-                border-radius: 3px; 
-                font-family: monospace; 
-                font-size: 0.8em; 
-            }
-            .download-btn {
-                background: #28a745;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                cursor: pointer;
-                margin-left: 5px;
-                font-size: 0.8em;
-            }
-            .download-btn:hover {
-                background: #218838;
-            }
-            .download-album-btn {
-                background: #007bff;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                cursor: pointer;
-            }
-            .download-album-btn:hover {
-                background: #0056b3;
-            }
-            .group-controls {
-                display: none; /* Hide by default, show only for track search */
-            }
-            .group-controls.show {
-                display: inline;
-            }
+            .album-item, .track-item { border: 1px solid #eee; padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .album-item { background-color: #f8f9fa; }
+            .track-item { background-color: #ffffff; margin-left: 20px; }
+            .tracks-container { display: none; margin-top: 10px; }
+            .button-group { margin: 10px 0; }
+            .download-btn { background-color: #28a745; margin-right: 10px; }
+            .download-btn:hover { background-color: #218838; }
+            .load-tracks-btn { background-color: #17a2b8; }
+            .load-tracks-btn:hover { background-color: #138496; }
+            .job-item { background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 5px 0; border-radius: 3px; }
+            .job-completed { background-color: #d4edda; border-color: #c3e6cb; }
+            .job-failed { background-color: #f8d7da; border-color: #f5c6cb; }
+            .job-running { background-color: #cce5ff; border-color: #b3d9ff; }
+            .info-note { background-color: #e7f3ff; border: 1px solid #b3d9ff; padding: 10px; margin: 10px 0; border-radius: 3px; font-size: 0.9em; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🎵 Orpheus Web Interface</h1>
+            <h1>Orpheus Music Downloader</h1>
 
-            <div class="search-box">
-                <input type="text" id="searchQuery" placeholder="Search for tracks..." value="">
-                <button onclick="searchTracks()">Search Tracks</button>
-                <button onclick="searchAlbums()">Search Albums</button>
+            <div class="info-note">
+                <strong>Note:</strong> Download formats are configured in the OrpheusManager config folder. 
+                The system will use the configured quality and codec settings for all downloads.
             </div>
 
-            <div class="controls">
-                <span class="group-controls" id="groupControls">
-                    <label><input type="checkbox" id="groupByAlbum"> Group by Album</label>
-                </span>
-                <label>Page Size: 
-                    <select id="pageSize">
-                        <option value="10">10</option>
-                        <option value="20" selected>20</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
-                    </select>
-                </label>
-                <label><input type="checkbox" id="showDebug"> Show Debug Info</label>
+            <!-- Search Section -->
+            <div class="section">
+                <h2>Search Music</h2>
+                <form id="searchForm">
+                    <div class="form-group">
+                        <label>Search Query:</label>
+                        <input type="text" id="searchQuery" placeholder="Enter artist, album, or track name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Platform:</label>
+                        <select id="platform" required>
+                            <option value="tidal">Tidal</option>
+                            <option value="spotify">Spotify</option>
+                            <option value="apple">Apple Music</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Username:</label>
+                        <input type="text" id="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password:</label>
+                        <input type="password" id="password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Search Type:</label>
+                        <select id="searchType">
+                            <option value="tracks">Tracks</option>
+                            <option value="albums">Albums</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Limit:</label>
+                        <input type="number" id="limit" value="10" min="1" max="50">
+                    </div>
+                    <button type="submit">Search</button>
+                </form>
+
+                <div id="searchResults" class="results"></div>
             </div>
 
-            <div id="pagination" class="pagination" style="display:none;"></div>
-            <div id="debug-info" class="debug" style="display:none;"></div>
-            <div id="results" class="results"></div>
-            <div id="pagination-bottom" class="pagination" style="display:none;"></div>
+            <!-- Jobs Section -->
+            <div class="section">
+                <h2>Download Jobs</h2>
+                <button onclick="refreshJobs()">Refresh Jobs</button>
+                <div id="jobsResults" class="results"></div>
+            </div>
         </div>
 
         <script>
-            let currentPage = 1;
-            let totalPages = 1;
-            let currentQuery = '';
-            let currentSearchType = 'tracks';
+            // Search functionality
+            document.getElementById('searchForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
 
-            function formatDuration(seconds) {
-                if (!seconds) return '';
-                const mins = Math.floor(seconds / 60);
-                const secs = seconds % 60;
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
-            }
-
-            function showDebug(data) {
-                const debugDiv = document.getElementById('debug-info');
-                const showDebug = document.getElementById('showDebug').checked;
-
-                if (showDebug) {
-                    debugDiv.style.display = 'block';
-                    debugDiv.innerHTML = '<strong>Debug Info:</strong><br>' + JSON.stringify(data, null, 2);
-                } else {
-                    debugDiv.style.display = 'none';
-                }
-            }
-
-            function renderPagination(containerId) {
-                const container = document.getElementById(containerId);
-                if (totalPages <= 1) {
-                    container.style.display = 'none';
-                    return;
-                }
-
-                container.style.display = 'block';
-                let html = '';
-
-                if (currentPage > 1) {
-                    html += `<button onclick="goToPage(${currentPage - 1})">Previous</button>`;
-                }
-
-                for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) {
-                    const current = i === currentPage ? 'current' : '';
-                    html += `<button class="${current}" onclick="goToPage(${i})">${i}</button>`;
-                }
-
-                if (currentPage < totalPages) {
-                    html += `<button onclick="goToPage(${currentPage + 1})">Next</button>`;
-                }
-
-                html += `<span style="margin-left: 20px;">Page ${currentPage} of ${totalPages} (${document.getElementById('totalResults') ? document.getElementById('totalResults').textContent : 'unknown'} total results)</span>`;
-                container.innerHTML = html;
-            }
-
-            function goToPage(page) {
-                currentPage = page;
-                if (currentSearchType === 'tracks') {
-                    searchTracks();
-                } else {
-                    searchAlbums();
-                }
-            }
-
-            async function searchTracks() {
                 const query = document.getElementById('searchQuery').value;
-                const groupByAlbum = document.getElementById('groupByAlbum').checked;
-                const pageSize = parseInt(document.getElementById('pageSize').value);
+                const platform = document.getElementById('platform').value;
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                const searchType = document.getElementById('searchType').value;
+                const limit = parseInt(document.getElementById('limit').value);
 
-                if (!query) return;
-
-                currentQuery = query;
-                currentSearchType = 'tracks';
-
-                // Show group controls for track search
-                document.getElementById('groupControls').classList.add('show');
-
-                // Reset to page 1 if this is a new search
-                if (currentPage === 1) {
-                    currentPage = 1;
-                }
+                const resultsDiv = document.getElementById('searchResults');
+                resultsDiv.innerHTML = '<p>Searching...</p>';
 
                 try {
-                    const response = await fetch('/api/search', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
+                    let endpoint, requestData;
+
+                    if (searchType === 'albums') {
+                        endpoint = '/api/search/albums';
+                        requestData = {
                             query: query,
-                            platforms: ['tidal'],
-                            limit: pageSize,
-                            page: currentPage,
-                            group_by_album: groupByAlbum
-                        })
+                            platforms: [platform],
+                            limit: limit,
+                            username: username,
+                            password: password
+                        };
+                    } else {
+                        endpoint = '/api/search/tracks';
+                        requestData = {
+                            query: query,
+                            platforms: [platform],
+                            limit: limit,
+                            page: 1,
+                            group_by_album: false,
+                            username: username,
+                            password: password
+                        };
+                    }
+
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(requestData)
                     });
 
-                    const data = await response.json();
-                    console.log('Search response:', data);
-                    showDebug(data);
-
-                    if (data.results && data.results.tidal) {
-                        const result = data.results.tidal;
-                        console.log('TIDAL result:', result);
-
-                        if (result.pagination) {
-                            totalPages = result.pagination.total_pages;
-                            currentPage = result.pagination.current_page;
-
-                            // Update total results display
-                            let totalResultsElement = document.getElementById('totalResults');
-                            if (!totalResultsElement) {
-                                totalResultsElement = document.createElement('span');
-                                totalResultsElement.id = 'totalResults';
-                                totalResultsElement.style.display = 'none';
-                                document.body.appendChild(totalResultsElement);
-                            }
-                            totalResultsElement.textContent = result.pagination.total_results;
-                        }
-
-                        displayResults(result, groupByAlbum);
-                        renderPagination('pagination');
-                        renderPagination('pagination-bottom');
-                    } else {
-                        console.error('No TIDAL results found in response:', data);
-                        document.getElementById('results').innerHTML = '<p>No results structure found in response.</p>';
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
+
+                    const data = await response.json();
+                    displayResults(data, searchType, platform, username, password);
+
                 } catch (error) {
                     console.error('Search error:', error);
-                    document.getElementById('results').innerHTML = `<p>Error: ${error.message}</p>`;
+                    resultsDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
                 }
+            });
+
+            function displayResults(data, searchType, platform, username, password) {
+                const resultsDiv = document.getElementById('searchResults');
+                let html = '';
+
+                if (searchType === 'albums' && data.albums) {
+                    html += `<h3>Albums (${data.albums.length})</h3>`;
+                    data.albums.forEach(album => {
+                        html += `
+                            <div class="album-item">
+                                <h4>${album.name}</h4>
+                                <p><strong>Artist:</strong> ${album.artist}</p>
+                                <p><strong>Year:</strong> ${album.year || 'Unknown'}</p>
+                                <div class="button-group">
+                                    <button class="load-tracks-btn" onclick="loadAlbumTracks('${album.id}', '${platform}', '${username}', '${password}', this)">
+                                        Load Tracks
+                                    </button>
+                                    <button class="download-btn" onclick="downloadAlbum('${album.url}', '${platform}')">
+                                        Download Album
+                                    </button>
+                                </div>
+                                <div class="tracks-container"></div>
+                            </div>
+                        `;
+                    });
+                } else if (searchType === 'tracks' && data.tracks) {
+                    html += `<h3>Tracks (${data.tracks.length})</h3>`;
+                    if (data.pagination) {
+                        html += `<p>Page ${data.pagination.current_page} of ${data.pagination.total_pages} (${data.pagination.total_results} total)</p>`;
+                    }
+                    data.tracks.forEach(track => {
+                        html += `
+                            <div class="track-item">
+                                <h4>${track.name}</h4>
+                                <p><strong>Artist:</strong> ${track.artist}</p>
+                                <p><strong>Album:</strong> ${track.album}</p>
+                                <p><strong>Duration:</strong> ${track.duration || 'Unknown'}</p>
+                                <button class="download-btn" onclick="downloadTrack('${track.url}', '${platform}')">
+                                    Download Track
+                                </button>
+                            </div>
+                        `;
+                    });
+                }
+
+                resultsDiv.innerHTML = html || '<p>No results found.</p>';
             }
 
-            async function searchAlbums() {
-                const query = document.getElementById('searchQuery').value;
-                const pageSize = parseInt(document.getElementById('pageSize').value);
+            // Load album tracks on demand
+            async function loadAlbumTracks(albumId, platform, username, password, button) {
+                const tracksContainer = button.parentElement.nextElementSibling;
 
-                if (!query) return;
+                if (tracksContainer.style.display === 'block') {
+                    tracksContainer.style.display = 'none';
+                    button.textContent = 'Load Tracks';
+                    return;
+                }
 
-                currentQuery = query;
-                currentSearchType = 'albums';
-
-                // Hide group controls for album search
-                document.getElementById('groupControls').classList.remove('show');
+                button.disabled = true;
+                button.textContent = 'Loading...';
 
                 try {
-                    const response = await fetch('/api/search-albums', {
+                    const response = await fetch(`/api/albums/${albumId}/tracks`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
                         body: JSON.stringify({
-                            query: query,
-                            platforms: ['tidal'],
-                            limit: pageSize
+                            album_id: albumId,
+                            platform: platform,
+                            username: username,
+                            password: password
                         })
                     });
 
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
                     const data = await response.json();
-                    console.log('Album search response:', data);
-                    showDebug(data);
-                    displayAlbumResults(data.results.tidal);
-                } catch (error) {
-                    console.error('Album search error:', error);
-                    document.getElementById('results').innerHTML = `<p>Error: ${error.message}</p>`;
-                }
-            }
 
-            function displayResults(result, groupByAlbum) {
-                const resultsDiv = document.getElementById('results');
-
-                console.log('Displaying results:', result);
-                console.log('Tracks array:', result.tracks);
-                console.log('Tracks length:', result.tracks ? result.tracks.length : 'undefined');
-
-                if (!result.tracks || result.tracks.length === 0) {
-                    resultsDiv.innerHTML = '<p>No tracks found.</p>';
-                    return;
-                }
-
-                let html = '';
-
-                if (groupByAlbum && result.organized) {
-                    // Display albums
-                    for (const [albumName, tracks] of Object.entries(result.organized.albums)) {
-                        // Get album URL from first track (assuming same album)
-                        const albumUrl = tracks[0] ? getAlbumUrlFromTrack(tracks[0].url) : '';
-
-                        html += `
-                            <div class="album-group">
-                                <div class="album-header">
-                                    <span>${albumName} (${tracks.length} tracks)</span>
-                                    ${albumUrl ? `<button class="download-album-btn" onclick="downloadAlbum('${albumUrl}', 'tidal')">Download Album</button>` : ''}
-                                </div>
-                                <div class="album-tracks">`;
-
-                        for (const track of tracks) {
-                            html += formatTrack(track);
-                        }
-
-                        html += `</div></div>`;
-                    }
-
-                    // Display singles
-                    if (result.organized.singles.length > 0) {
-                        html += `
-                            <div class="singles-section">
-                                <div class="singles-header">Singles (${result.organized.singles.length} tracks)</div>
-                                <div class="album-tracks">`;
-
-                        for (const track of result.organized.singles) {
-                            html += formatTrack(track);
-                        }
-
-                        html += `</div></div>`;
-                    }
-                } else {
-                    // Display as simple list
-                    for (const track of result.tracks) {
-                        html += formatTrack(track);
-                    }
-                }
-
-                resultsDiv.innerHTML = html;
-            }
-
-            function formatTrack(track) {
-                const duration = formatDuration(track.duration);
-                const quality = track.quality ? `<span class="track-quality">${track.quality}</span>` : '';
-                const explicit = track.explicit ? '<span class="explicit">E</span>' : '';
-
-                return `
-                    <div class="track">
-                        <strong>${track.name}</strong> by ${track.artist}
-                        <br>
-                        <small>
-                            Album: ${track.album} • ${duration} • ${track.year || 'Unknown Year'} ${quality} ${explicit}
-                        </small>
-                        <br>
-                        <button class="download-btn" onclick="downloadTrack('${track.url}', 'tidal')">Download Track</button>
-                    </div>
-                `;
-            }
-
-            function getAlbumUrlFromTrack(trackUrl) {
-                // Convert track URL to album URL
-                // https://tidal.com/browse/track/123456 -> https://tidal.com/browse/album/123456
-                return trackUrl.replace('/track/', '/album/');
-            }
-
-            function displayAlbumResults(result) {
-                const resultsDiv = document.getElementById('results');
-
-                if (!result.albums || result.albums.length === 0) {
-                    resultsDiv.innerHTML = '<p>No albums found.</p>';
-                    return;
-                }
-
-                let html = '<h3>Albums Found:</h3>';
-
-                for (const album of result.albums) {
-                    const albumDuration = album.duration ? ` • ${formatDuration(album.duration)}` : '';
-
-                    html += `
-                        <div class="album-result">
-                            <div class="album-result-header">
-                                <span>${album.name} by ${album.artist}</span>
-                                <button class="download-album-btn" onclick="downloadAlbum('${album.url}', 'tidal')">Download Album</button>
+                    let tracksHtml = '<div class="tracks-list"><h5>Tracks:</h5>';
+                    data.tracks.forEach(track => {
+                        tracksHtml += `
+                            <div class="track-item">
+                                <span><strong>${track.track_number}.</strong> ${track.name}</span>
+                                <span style="margin-left: 20px;"><em>${track.artist}</em></span>
+                                <button class="download-btn" onclick="downloadTrack('${track.url}', '${platform}')" style="margin-left: 20px;">
+                                    Download
+                                </button>
                             </div>
-                            <div class="album-result-info">
-                                ${album.year || 'Unknown Year'}${albumDuration} • ${album.tracks.length} tracks
-                            </div>`;
+                        `;
+                    });
+                    tracksHtml += '</div>';
 
-                    if (album.tracks && album.tracks.length > 0) {
-                        html += '<div class="tracklist">';
+                    tracksContainer.innerHTML = tracksHtml;
+                    tracksContainer.style.display = 'block';
+                    button.textContent = 'Hide Tracks';
 
-                        for (const track of album.tracks) {
-                            const trackDuration = formatDuration(track.duration);
-                            const explicit = track.explicit ? '<span class="explicit">E</span>' : '';
-
-                            html += `
-                                <div class="tracklist-item">
-                                    <span class="track-number">${track.track_number}</span>
-                                    <div class="track-info">
-                                        <div class="track-name">${track.name}${explicit}</div>
-                                        <div class="track-artist">${track.artist}</div>
-                                    </div>
-                                    <span class="track-duration">${trackDuration}</span>
-                                    <button class="download-btn" onclick="downloadTrack('${track.url}', 'tidal')">Download</button>
-                                </div>
-                            `;
-                        }
-
-                        html += '</div>';
-                    } else {
-                        html += '<div style="padding: 15px; color: #6c757d; font-style: italic;">No tracklist available</div>';
-                    }
-
-                    html += '</div>';
+                } catch (error) {
+                    console.error('Error loading tracks:', error);
+                    alert('Error loading tracks: ' + error.message);
+                    button.textContent = 'Load Tracks';
+                } finally {
+                    button.disabled = false;
                 }
-
-                resultsDiv.innerHTML = html;
-
-                // Hide pagination for album search
-                document.getElementById('pagination').style.display = 'none';
-                document.getElementById('pagination-bottom').style.display = 'none';
             }
 
-            async function downloadTrack(trackUrl, platform) {
+            // Download functions - simplified without format selection
+            async function downloadTrack(url, platform) {
                 try {
-                    console.log('Downloading track:', trackUrl);
-
                     const response = await fetch('/api/download', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
                         body: JSON.stringify({
-                            url: trackUrl,
+                            url: url,
                             platform: platform,
                             type: 'track'
                         })
                     });
 
-                    const data = await response.json();
-
-                    if (data.success) {
-                        alert(`Track download started!\\nPID: ${data.pid}\\nCommand: ${data.command}`);
-                    } else {
-                        alert(`Download failed: ${data.error}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
+
+                    const data = await response.json();
+                    alert(`Track download job started! Job ID: ${data.job_id}`);
+                    refreshJobs();
+
                 } catch (error) {
-                    console.error('Download error:', error);
-                    alert(`Download error: ${error.message}`);
+                    console.error('Error starting download:', error);
+                    alert('Error starting download: ' + error.message);
                 }
             }
 
-            async function downloadAlbum(albumUrl, platform) {
+            async function downloadAlbum(url, platform) {
                 try {
-                    console.log('Downloading album:', albumUrl);
-
                     const response = await fetch('/api/download', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
                         body: JSON.stringify({
-                            url: albumUrl,
+                            url: url,
                             platform: platform,
                             type: 'album'
                         })
                     });
 
-                    const data = await response.json();
-
-                    if (data.success) {
-                        alert(`Album download started!\\nPID: ${data.pid}\\nCommand: ${data.command}`);
-                    } else {
-                        alert(`Download failed: ${data.error}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
+
+                    const data = await response.json();
+                    alert(`Album download job started! Job ID: ${data.job_id}`);
+                    refreshJobs();
+
                 } catch (error) {
-                    console.error('Download error:', error);
-                    alert(`Download error: ${error.message}`);
+                    console.error('Error starting album download:', error);
+                    alert('Error starting album download: ' + error.message);
                 }
             }
+
+            // Job management
+            async function refreshJobs() {
+                try {
+                    const response = await fetch('/api/jobs');
+                    const data = await response.json();
+
+                    const jobsDiv = document.getElementById('jobsResults');
+                    let html = '';
+
+                    if (data.jobs && data.jobs.length > 0) {
+                        html += `<h3>Download Jobs (${data.jobs.length})</h3>`;
+                        data.jobs.forEach(job => {
+                            const statusClass = `job-${job.status}`;
+                            html += `
+                                <div class="job-item ${statusClass}">
+                                    <h4>Job ${job.job_id.substring(0, 8)}...</h4>
+                                    <p><strong>Type:</strong> ${job.job_type}</p>
+                                    <p><strong>Status:</strong> ${job.status}</p>
+                                    <p><strong>URL:</strong> ${job.url}</p>
+                                    <p><strong>Created:</strong> ${new Date(job.created_at).toLocaleString()}</p>
+                                    ${job.error_message ? `<p style="color: red;"><strong>Error:</strong> ${job.error_message}</p>` : ''}
+                                    <button onclick="viewJobLogs('${job.job_id}')">View Logs</button>
+                                </div>
+                            `;
+                        });
+                    } else {
+                        html = '<p>No jobs found.</p>';
+                    }
+
+                    jobsDiv.innerHTML = html;
+
+                } catch (error) {
+                    console.error('Error refreshing jobs:', error);
+                    document.getElementById('jobsResults').innerHTML = `<p style="color: red;">Error loading jobs: ${error.message}</p>`;
+                }
+            }
+
+            async function viewJobLogs(jobId) {
+                try {
+                    const response = await fetch(`/api/jobs/${jobId}/logs`);
+                    const data = await response.json();
+
+                    let logsText = `Logs for Job ${jobId}:\\n\\n`;
+                    data.logs.forEach(log => {
+                        logsText += `[${log.timestamp}] ${log.level}: ${log.message}\\n`;
+                    });
+
+                    alert(logsText);
+
+                } catch (error) {
+                    console.error('Error getting job logs:', error);
+                    alert('Error getting job logs: ' + error.message);
+                }
+            }
+
+            // Auto-refresh jobs every 10 seconds
+            setInterval(refreshJobs, 10000);
+
+            // Load jobs on page load
+            refreshJobs();
         </script>
     </body>
     </html>
-    """
-    return HTMLResponse(content=html_content)
+    """)
 
 
-@app.post("/api/search")
+# API endpoints
+@app.post("/api/search/tracks")
 async def search_tracks(request: SearchRequest):
-    results = {}
+    """Search for tracks with pagination and grouping"""
+    try:
+        if not request.platforms or len(request.platforms) == 0:
+            raise HTTPException(status_code=400, detail="At least one platform must be specified")
 
-    for platform in request.platforms:
-        try:
-            result = await orpheus_manager.search_with_credentials(
-                platform=platform,
-                query=request.query,
-                username=request.username or "",
-                password=request.password or "",
-                page=request.page,
-                limit=request.limit,
-                group_by_album=request.group_by_album
-            )
-            results[platform] = result
+        # For now, use the first platform (can be extended for multi-platform search)
+        platform = request.platforms[0]
 
-            # Debug logging
-            print(f"API sending result for {platform}:")
-            print(f"  Result type: {type(result)}")
-            print(f"  Result keys: {list(result.keys()) if isinstance(result, dict) else 'not dict'}")
-            print(f"  Tracks count: {len(result.get('tracks', [])) if isinstance(result, dict) else 'unknown'}")
+        results = await orpheus_manager.search_with_credentials(
+            platform=platform,
+            query=request.query,
+            username=request.username,
+            password=request.password,
+            page=request.page,
+            limit=request.limit,
+            group_by_album=request.group_by_album
+        )
 
-        except Exception as e:
-            print(f"API error for {platform}: {e}")
-            results[platform] = {"error": str(e)}
+        return results
 
-    print(f"Final API response structure: {list(results.keys())}")
-    return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/search-albums")
+@app.post("/api/search/albums")
 async def search_albums_endpoint(request: AlbumSearchRequest):
-    results = {}
+    """Search for albums without loading track lists"""
+    try:
+        if not request.platforms or len(request.platforms) == 0:
+            raise HTTPException(status_code=400, detail="At least one platform must be specified")
 
-    for platform in request.platforms:
-        try:
-            result = await orpheus_manager.search_albums(
-                platform=platform,
-                query=request.query,
-                username=request.username or "",
-                password=request.password or "",
-                limit=request.limit
-            )
-            results[platform] = result
-        except Exception as e:
-            results[platform] = {"error": str(e)}
+        # For now, use the first platform
+        platform = request.platforms[0]
 
-    return {"results": results}
+        results = await orpheus_manager.search_albums(
+            platform=platform,
+            query=request.query,
+            username=request.username,
+            password=request.password,
+            limit=request.limit
+        )
+
+        return results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/albums/{album_id}/tracks")
+async def get_album_tracks_endpoint(album_id: str, request: AlbumTracksRequest):
+    """Load tracks for a specific album on demand"""
+    try:
+        tracks_data = await orpheus_manager.get_album_tracks(
+            request.platform,
+            album_id,
+            request.username,
+            request.password
+        )
+        return tracks_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/download/multi-format", response_model=JobResponse)
+async def download_multi_format_endpoint(request: MultiFormatDownloadRequest):
+    """Start a download job using configured formats"""
+    try:
+        # Determine job type
+        job_type = JobType.TRACK_DOWNLOAD if request.type == "track" else JobType.ALBUM_DOWNLOAD
+
+        # Create job - formats are just for display, actual formats come from config
+        job_id = job_manager.create_job(
+            job_type=job_type,
+            url=request.url,
+            platform=request.platform,
+            formats=["configured"],  # Placeholder since formats come from config
+            user_id=request.user_id
+        )
+
+        # Start the job in background
+        job_manager.start_download_job(job_id)
+
+        return JSONResponse(
+            status_code=202,  # Accepted
+            content={
+                "job_id": job_id,
+                "status": "accepted",
+                "message": f"Download job started for {request.type}: {request.url}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/jobs")
+async def get_all_jobs(user_id: Optional[str] = None):
+    """Get all jobs, optionally filtered by user_id"""
+    try:
+        jobs = job_manager.get_all_jobs(user_id)
+        return {"jobs": jobs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Get status and details of a specific job"""
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return job.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/jobs/{job_id}/logs")
+async def get_job_logs(job_id: str):
+    """Get logs for a specific job"""
+    try:
+        logs = job_manager.get_job_logs(job_id)
+        if logs is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return {"job_id": job_id, "logs": logs}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Main download endpoint - uses configured formats
 @app.post("/api/download")
 async def download_endpoint(request: DownloadRequest):
+    """Download endpoint that uses configured formats from OrpheusManager"""
     try:
-        if request.type == 'track':
-            result = await orpheus_manager.download_track(
-                platform=request.platform,
-                track_url=request.url
-            )
-        elif request.type == 'album':
-            result = await orpheus_manager.download_album(
-                platform=request.platform,
-                album_url=request.url
-            )
-        else:
-            return {"success": False, "error": "Invalid download type"}
+        # Convert to multi-format request using config
+        multi_format_request = MultiFormatDownloadRequest(
+            url=request.url,
+            platform=request.platform,
+            type=request.type,
+            formats=["configured"]  # Formats come from config
+        )
 
-        return result
+        return await download_multi_format_endpoint(multi_format_request)
+
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/platforms")
 async def get_platforms():
-    return {"platforms": orpheus_manager.get_available_platforms()}
+    """Get list of available platforms"""
+    try:
+        platforms = orpheus_manager.get_available_platforms()
+        return {"platforms": platforms}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# Run the application
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

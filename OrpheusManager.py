@@ -1,4 +1,4 @@
-# orpheus_manager.py
+
 from orpheus.core import Orpheus
 import traceback
 import subprocess
@@ -211,7 +211,7 @@ class OrpheusManager:
             raise Exception(f"Search failed on {platform}: {e}")
 
     async def search_albums(self, platform: str, query: str, username: str, password: str, limit: int = 10):
-        """Search for albums specifically with tracklist"""
+        """Search for albums specifically WITHOUT loading tracklists"""
         try:
             module = self.orpheus.load_module(platform.lower())
 
@@ -234,93 +234,11 @@ class OrpheusManager:
                         "year": result.year if hasattr(result, 'year') else None,
                         "type": "album",
                         "url": f"https://tidal.com/browse/album/{result.result_id}",
-                        "tracks": []
+                        "tracks_loaded": False  # Indicate tracks are not loaded yet
                     }
 
-                    # Get detailed album info with tracklist
-                    try:
-                        print(f"Fetching detailed info for album: {result.name}")
-                        album_info = module.get_album_info(result.result_id)
-
-                        # Extract track information from album_info
-                        if hasattr(album_info, 'tracks') and album_info.tracks:
-                            print(f"Album has {len(album_info.tracks)} tracks")
-
-                            # Set up quality and codec options for track info calls
-                            quality_tier = QualityEnum.HIGH
-                            codec_options = CodecOptions(
-                                proprietary_codecs=True,
-                                spatial_codecs=True
-                            )
-
-                            for idx, track_id in enumerate(album_info.tracks, 1):
-                                try:
-                                    # Get detailed track info to get real track names
-                                    track_info = module.get_track_info(track_id, quality_tier, codec_options)
-
-                                    # Extract real track name and info
-                                    track_name = f"Track {idx}"  # Default fallback
-                                    track_artist = album_data["artist"]  # Default to album artist
-                                    track_duration = 0
-                                    track_explicit = False
-
-                                    if track_info:
-                                        if hasattr(track_info, 'name') and track_info.name:
-                                            track_name = track_info.name
-
-                                        if hasattr(track_info, 'artists') and track_info.artists:
-                                            if isinstance(track_info.artists, list):
-                                                track_artist = ", ".join(track_info.artists)
-                                            else:
-                                                track_artist = str(track_info.artists)
-
-                                        if hasattr(track_info, 'duration') and track_info.duration:
-                                            track_duration = track_info.duration
-
-                                        if hasattr(track_info, 'explicit'):
-                                            track_explicit = track_info.explicit
-
-                                    track_data = {
-                                        "track_number": idx,
-                                        "id": track_id,
-                                        "name": track_name,
-                                        "artist": track_artist,
-                                        "duration": track_duration,
-                                        "explicit": track_explicit,
-                                        "url": f"https://tidal.com/browse/track/{track_id}"
-                                    }
-
-                                    album_data["tracks"].append(track_data)
-                                    print(f"  Track {idx}: {track_name} by {track_artist}")
-
-                                except Exception as track_error:
-                                    print(f"Error getting track info for {track_id}: {track_error}")
-                                    # Add placeholder track with basic info
-                                    album_data["tracks"].append({
-                                        "track_number": idx,
-                                        "id": track_id,
-                                        "name": f"Track {idx}",
-                                        "artist": album_data["artist"],
-                                        "duration": 0,
-                                        "explicit": False,
-                                        "url": f"https://tidal.com/browse/track/{track_id}"
-                                    })
-                        else:
-                            print(f"No tracks found in album_info for {result.name}")
-
-                        # Add album duration and other info if available
-                        if hasattr(album_info, 'duration') and album_info.duration:
-                            album_data["duration"] = album_info.duration
-                        if hasattr(album_info, 'release_year') and album_info.release_year:
-                            album_data["year"] = album_info.release_year
-
-                    except Exception as album_info_error:
-                        print(f"Error getting album info for {result.result_id}: {album_info_error}")
-                        print(f"Album info error traceback: {traceback.format_exc()}")
-                        # Keep basic album data without tracks
-
                     albums.append(album_data)
-                    print(f"Added album: {album_data['name']} with {len(album_data['tracks'])} tracks")
+                    print(f"Added album: {album_data['name']} (tracks not loaded)")
 
             # Return simple albums structure (no organized grouping for album search)
             return {"albums": albums}
@@ -328,6 +246,89 @@ class OrpheusManager:
         except Exception as e:
             print(f"Album search error: {e}")
             raise Exception(f"Album search failed on {platform}: {e}")
+
+    async def get_album_tracks(self, platform: str, album_id: str, username: str, password: str):
+        """Load tracks for a specific album on demand"""
+        try:
+            module = self.orpheus.load_module(platform.lower())
+
+            if not hasattr(module, 'session') or not module.session:
+                raise Exception("No authenticated session found. Please authenticate manually first.")
+
+            print(f"Loading tracks for album: {album_id}")
+
+            # Get detailed album info with tracklist
+            album_info = module.get_album_info(album_id)
+            tracks = []
+
+            if hasattr(album_info, 'tracks') and album_info.tracks:
+                print(f"Album has {len(album_info.tracks)} tracks")
+
+                # Set up quality and codec options for track info calls
+                quality_tier = QualityEnum.HIGH
+                codec_options = CodecOptions(
+                    proprietary_codecs=True,
+                    spatial_codecs=True
+                )
+
+                for idx, track_id in enumerate(album_info.tracks, 1):
+                    try:
+                        # Get detailed track info to get real track names
+                        track_info = module.get_track_info(track_id, quality_tier, codec_options)
+
+                        # Extract real track name and info
+                        track_name = f"Track {idx}"  # Default fallback
+                        track_artist = "Unknown Artist"
+                        track_duration = 0
+                        track_explicit = False
+
+                        if track_info:
+                            if hasattr(track_info, 'name') and track_info.name:
+                                track_name = track_info.name
+
+                            if hasattr(track_info, 'artists') and track_info.artists:
+                                if isinstance(track_info.artists, list):
+                                    track_artist = ", ".join(track_info.artists)
+                                else:
+                                    track_artist = str(track_info.artists)
+
+                            if hasattr(track_info, 'duration') and track_info.duration:
+                                track_duration = track_info.duration
+
+                            if hasattr(track_info, 'explicit'):
+                                track_explicit = track_info.explicit
+
+                        track_data = {
+                            "track_number": idx,
+                            "id": track_id,
+                            "name": track_name,
+                            "artist": track_artist,
+                            "duration": track_duration,
+                            "explicit": track_explicit,
+                            "url": f"https://tidal.com/browse/track/{track_id}"
+                        }
+
+                        tracks.append(track_data)
+                        print(f"  Track {idx}: {track_name} by {track_artist}")
+
+                    except Exception as track_error:
+                        print(f"Error getting track info for {track_id}: {track_error}")
+                        # Add placeholder track with basic info
+                        tracks.append({
+                            "track_number": idx,
+                            "id": track_id,
+                            "name": f"Track {idx}",
+                            "artist": "Unknown Artist",
+                            "duration": 0,
+                            "explicit": False,
+                            "url": f"https://tidal.com/browse/track/{track_id}"
+                        })
+
+            return {"tracks": tracks}
+
+        except Exception as e:
+            print(f"Error loading album tracks: {e}")
+            raise Exception(f"Failed to load album tracks: {e}")
 
     async def download_track(self, platform: str, track_url: str):
         """Download track using orpheus.py script"""
