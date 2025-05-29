@@ -1,469 +1,83 @@
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
+import os
 
 # Import our custom modules
 from OrpheusManager import OrpheusManager
 from job_manager import job_manager, JobType, JobStatus
+from models.AlbumSearchRequest import AlbumSearchRequest
+from models.AlbumTracksRequest import AlbumTracksRequest
+from models.AppleAuth2FAResponse import AppleAuth2FAResponse
+from models.AppleAuthRequest import AppleAuthRequest
+from models.DownloadRequest import DownloadRequest
+from models.JobResponse import JobResponse
+from models.MultiFormatDownloadRequest import MultiFormatDownloadRequest
+from models.Searchrequest import SearchRequest
+from modules.applemusic.AppleAuthHandler import apple_2fa_handler
 
 # Initialize FastAPI app
 app = FastAPI(title="Orpheus Music Downloader API", version="1.0.0")
+
+# Create directories if they don't exist
+os.makedirs("static/css", exist_ok=True)
+os.makedirs("static/js", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Initialize templates
+templates = Jinja2Templates(directory="templates")
 
 # Initialize OrpheusManager
 orpheus_manager = OrpheusManager()
 
 
-# Pydantic models for request/response validation
-class AuthRequest(BaseModel):
-    platform: str
-    username: str
-    password: str
-
-
-class SearchRequest(BaseModel):
-    query: str
-    platforms: List[str]
-    limit: int = 20
-    page: int = 1
-    group_by_album: bool = False
-    username: str
-    password: str
-
-
-class AlbumSearchRequest(BaseModel):
-    query: str
-    platforms: List[str]
-    limit: int = 10
-    username: str
-    password: str
-
-
-class AlbumTracksRequest(BaseModel):
-    album_id: str
-    platform: str
-    username: str
-    password: str
-
-
-class DownloadRequest(BaseModel):
-    url: str
-    platform: str
-    type: str
-
-
-class MultiFormatDownloadRequest(BaseModel):
-    url: str
-    platform: str
-    type: str  # "track" or "album"
-    formats: List[str] = ["configured"]  # Placeholder - formats come from config
-    user_id: Optional[str] = None
-
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    message: str
-
-
-# Root endpoint with basic HTML interface
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    """Root endpoint with a simple HTML interface for testing"""
-    return HTMLResponse(content="""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Orpheus Music Downloader</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; }
-            .container { max-width: 1200px; margin: 0 auto; }
-            .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
-            .form-group { margin: 15px 0; }
-            label { display: block; margin-bottom: 5px; font-weight: bold; }
-            input, select, button { padding: 8px; margin: 5px; }
-            input[type="text"], input[type="password"], select { width: 300px; }
-            button { background-color: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 3px; }
-            button:hover { background-color: #0056b3; }
-            button:disabled { background-color: #6c757d; cursor: not-allowed; }
-            .results { margin-top: 20px; }
-            .album-item, .track-item { border: 1px solid #eee; padding: 15px; margin: 10px 0; border-radius: 5px; }
-            .album-item { background-color: #f8f9fa; }
-            .track-item { background-color: #ffffff; margin-left: 20px; }
-            .tracks-container { display: none; margin-top: 10px; }
-            .button-group { margin: 10px 0; }
-            .download-btn { background-color: #28a745; margin-right: 10px; }
-            .download-btn:hover { background-color: #218838; }
-            .load-tracks-btn { background-color: #17a2b8; }
-            .load-tracks-btn:hover { background-color: #138496; }
-            .job-item { background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 5px 0; border-radius: 3px; }
-            .job-completed { background-color: #d4edda; border-color: #c3e6cb; }
-            .job-failed { background-color: #f8d7da; border-color: #f5c6cb; }
-            .job-running { background-color: #cce5ff; border-color: #b3d9ff; }
-            .info-note { background-color: #e7f3ff; border: 1px solid #b3d9ff; padding: 10px; margin: 10px 0; border-radius: 3px; font-size: 0.9em; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Orpheus Music Downloader</h1>
-
-            <div class="info-note">
-                <strong>Note:</strong> Download formats are configured in the OrpheusManager config folder. 
-                The system will use the configured quality and codec settings for all downloads.
-            </div>
-
-            <!-- Search Section -->
-            <div class="section">
-                <h2>Search Music</h2>
-                <form id="searchForm">
-                    <div class="form-group">
-                        <label>Search Query:</label>
-                        <input type="text" id="searchQuery" placeholder="Enter artist, album, or track name" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Platform:</label>
-                        <select id="platform" required>
-                            <option value="tidal">Tidal</option>
-                            <option value="spotify">Spotify</option>
-                            <option value="apple">Apple Music</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Username:</label>
-                        <input type="text" id="username" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Password:</label>
-                        <input type="password" id="password" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Search Type:</label>
-                        <select id="searchType">
-                            <option value="tracks">Tracks</option>
-                            <option value="albums">Albums</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Limit:</label>
-                        <input type="number" id="limit" value="10" min="1" max="50">
-                    </div>
-                    <button type="submit">Search</button>
-                </form>
-
-                <div id="searchResults" class="results"></div>
-            </div>
-
-            <!-- Jobs Section -->
-            <div class="section">
-                <h2>Download Jobs</h2>
-                <button onclick="refreshJobs()">Refresh Jobs</button>
-                <div id="jobsResults" class="results"></div>
-            </div>
-        </div>
-
-        <script>
-            // Search functionality
-            document.getElementById('searchForm').addEventListener('submit', async function(e) {
-                e.preventDefault();
-
-                const query = document.getElementById('searchQuery').value;
-                const platform = document.getElementById('platform').value;
-                const username = document.getElementById('username').value;
-                const password = document.getElementById('password').value;
-                const searchType = document.getElementById('searchType').value;
-                const limit = parseInt(document.getElementById('limit').value);
-
-                const resultsDiv = document.getElementById('searchResults');
-                resultsDiv.innerHTML = '<p>Searching...</p>';
-
-                try {
-                    let endpoint, requestData;
-
-                    if (searchType === 'albums') {
-                        endpoint = '/api/search/albums';
-                        requestData = {
-                            query: query,
-                            platforms: [platform],
-                            limit: limit,
-                            username: username,
-                            password: password
-                        };
-                    } else {
-                        endpoint = '/api/search/tracks';
-                        requestData = {
-                            query: query,
-                            platforms: [platform],
-                            limit: limit,
-                            page: 1,
-                            group_by_album: false,
-                            username: username,
-                            password: password
-                        };
-                    }
-
-                    const response = await fetch(endpoint, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(requestData)
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    displayResults(data, searchType, platform, username, password);
-
-                } catch (error) {
-                    console.error('Search error:', error);
-                    resultsDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-                }
-            });
-
-            function displayResults(data, searchType, platform, username, password) {
-                const resultsDiv = document.getElementById('searchResults');
-                let html = '';
-
-                if (searchType === 'albums' && data.albums) {
-                    html += `<h3>Albums (${data.albums.length})</h3>`;
-                    data.albums.forEach(album => {
-                        html += `
-                            <div class="album-item">
-                                <h4>${album.name}</h4>
-                                <p><strong>Artist:</strong> ${album.artist}</p>
-                                <p><strong>Year:</strong> ${album.year || 'Unknown'}</p>
-                                <div class="button-group">
-                                    <button class="load-tracks-btn" onclick="loadAlbumTracks('${album.id}', '${platform}', '${username}', '${password}', this)">
-                                        Load Tracks
-                                    </button>
-                                    <button class="download-btn" onclick="downloadAlbum('${album.url}', '${platform}')">
-                                        Download Album
-                                    </button>
-                                </div>
-                                <div class="tracks-container"></div>
-                            </div>
-                        `;
-                    });
-                } else if (searchType === 'tracks' && data.tracks) {
-                    html += `<h3>Tracks (${data.tracks.length})</h3>`;
-                    if (data.pagination) {
-                        html += `<p>Page ${data.pagination.current_page} of ${data.pagination.total_pages} (${data.pagination.total_results} total)</p>`;
-                    }
-                    data.tracks.forEach(track => {
-                        html += `
-                            <div class="track-item">
-                                <h4>${track.name}</h4>
-                                <p><strong>Artist:</strong> ${track.artist}</p>
-                                <p><strong>Album:</strong> ${track.album}</p>
-                                <p><strong>Duration:</strong> ${track.duration || 'Unknown'}</p>
-                                <button class="download-btn" onclick="downloadTrack('${track.url}', '${platform}')">
-                                    Download Track
-                                </button>
-                            </div>
-                        `;
-                    });
-                }
-
-                resultsDiv.innerHTML = html || '<p>No results found.</p>';
-            }
-
-            // Load album tracks on demand
-            async function loadAlbumTracks(albumId, platform, username, password, button) {
-                const tracksContainer = button.parentElement.nextElementSibling;
-
-                if (tracksContainer.style.display === 'block') {
-                    tracksContainer.style.display = 'none';
-                    button.textContent = 'Load Tracks';
-                    return;
-                }
-
-                button.disabled = true;
-                button.textContent = 'Loading...';
-
-                try {
-                    const response = await fetch(`/api/albums/${albumId}/tracks`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            album_id: albumId,
-                            platform: platform,
-                            username: username,
-                            password: password
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-
-                    let tracksHtml = '<div class="tracks-list"><h5>Tracks:</h5>';
-                    data.tracks.forEach(track => {
-                        tracksHtml += `
-                            <div class="track-item">
-                                <span><strong>${track.track_number}.</strong> ${track.name}</span>
-                                <span style="margin-left: 20px;"><em>${track.artist}</em></span>
-                                <button class="download-btn" onclick="downloadTrack('${track.url}', '${platform}')" style="margin-left: 20px;">
-                                    Download
-                                </button>
-                            </div>
-                        `;
-                    });
-                    tracksHtml += '</div>';
-
-                    tracksContainer.innerHTML = tracksHtml;
-                    tracksContainer.style.display = 'block';
-                    button.textContent = 'Hide Tracks';
-
-                } catch (error) {
-                    console.error('Error loading tracks:', error);
-                    alert('Error loading tracks: ' + error.message);
-                    button.textContent = 'Load Tracks';
-                } finally {
-                    button.disabled = false;
-                }
-            }
-
-            // Download functions - simplified without format selection
-            async function downloadTrack(url, platform) {
-                try {
-                    const response = await fetch('/api/download', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            url: url,
-                            platform: platform,
-                            type: 'track'
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    alert(`Track download job started! Job ID: ${data.job_id}`);
-                    refreshJobs();
-
-                } catch (error) {
-                    console.error('Error starting download:', error);
-                    alert('Error starting download: ' + error.message);
-                }
-            }
-
-            async function downloadAlbum(url, platform) {
-                try {
-                    const response = await fetch('/api/download', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            url: url,
-                            platform: platform,
-                            type: 'album'
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    alert(`Album download job started! Job ID: ${data.job_id}`);
-                    refreshJobs();
-
-                } catch (error) {
-                    console.error('Error starting album download:', error);
-                    alert('Error starting album download: ' + error.message);
-                }
-            }
-
-            // Job management
-            async function refreshJobs() {
-                try {
-                    const response = await fetch('/api/jobs');
-                    const data = await response.json();
-
-                    const jobsDiv = document.getElementById('jobsResults');
-                    let html = '';
-
-                    if (data.jobs && data.jobs.length > 0) {
-                        html += `<h3>Download Jobs (${data.jobs.length})</h3>`;
-                        data.jobs.forEach(job => {
-                            const statusClass = `job-${job.status}`;
-                            html += `
-                                <div class="job-item ${statusClass}">
-                                    <h4>Job ${job.job_id.substring(0, 8)}...</h4>
-                                    <p><strong>Type:</strong> ${job.job_type}</p>
-                                    <p><strong>Status:</strong> ${job.status}</p>
-                                    <p><strong>URL:</strong> ${job.url}</p>
-                                    <p><strong>Created:</strong> ${new Date(job.created_at).toLocaleString()}</p>
-                                    ${job.error_message ? `<p style="color: red;"><strong>Error:</strong> ${job.error_message}</p>` : ''}
-                                    <button onclick="viewJobLogs('${job.job_id}')">View Logs</button>
-                                </div>
-                            `;
-                        });
-                    } else {
-                        html = '<p>No jobs found.</p>';
-                    }
-
-                    jobsDiv.innerHTML = html;
-
-                } catch (error) {
-                    console.error('Error refreshing jobs:', error);
-                    document.getElementById('jobsResults').innerHTML = `<p style="color: red;">Error loading jobs: ${error.message}</p>`;
-                }
-            }
-
-            async function viewJobLogs(jobId) {
-                try {
-                    const response = await fetch(`/api/jobs/${jobId}/logs`);
-                    const data = await response.json();
-
-                    let logsText = `Logs for Job ${jobId}:\\n\\n`;
-                    data.logs.forEach(log => {
-                        logsText += `[${log.timestamp}] ${log.level}: ${log.message}\\n`;
-                    });
-
-                    alert(logsText);
-
-                } catch (error) {
-                    console.error('Error getting job logs:', error);
-                    alert('Error getting job logs: ' + error.message);
-                }
-            }
-
-            // Auto-refresh jobs every 10 seconds
-            setInterval(refreshJobs, 10000);
-
-            // Load jobs on page load
-            refreshJobs();
-        </script>
-    </body>
-    </html>
-    """)
+async def root(request: Request):
+    """Root endpoint with templated HTML interface"""
+    return templates.TemplateResponse(
+        "index.html", 
+        {"request": request}
+    )
 
 
 # API endpoints
 @app.post("/api/search/tracks")
 async def search_tracks(request: SearchRequest):
-    """Search for tracks with pagination and grouping"""
+    """Search for tracks with 2FA support for Apple Music"""
     try:
-        if not request.platforms or len(request.platforms) == 0:
-            raise HTTPException(status_code=400, detail="At least one platform must be specified")
-
-        # For now, use the first platform (can be extended for multi-platform search)
         platform = request.platforms[0]
 
+        if platform == "apple":
+            # For Apple Music, check if we need 2FA
+            auth_request = AppleAuthRequest(
+                username=request.username,
+                password=request.password,
+                verification_code=request.verification_code
+            )
+
+            # This will handle the 2FA flow if needed
+            auth_result = await authenticate_apple(auth_request)
+
+            if auth_result.requires_2fa:
+                raise HTTPException(
+                    status_code=428,  # Precondition Required
+                    detail={
+                        "message": "2FA verification required",
+                        "session_id": auth_result.session_id,
+                        "requires_2fa": True
+                    }
+                )
+
+        # Continue with normal search if auth is complete
         results = await orpheus_manager.search_with_credentials(
             platform=platform,
             query=request.query,
@@ -476,6 +90,8 @@ async def search_tracks(request: SearchRequest):
 
         return results
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -593,7 +209,6 @@ async def get_job_logs(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Main download endpoint - uses configured formats
 @app.post("/api/download")
 async def download_endpoint(request: DownloadRequest):
     """Download endpoint that uses configured formats from OrpheusManager"""
@@ -618,6 +233,98 @@ async def get_platforms():
     try:
         platforms = orpheus_manager.get_available_platforms()
         return {"platforms": platforms}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/apple", response_model=AppleAuth2FAResponse)
+async def authenticate_apple(request: AppleAuthRequest):
+    """Handle Apple Music authentication with 2FA support"""
+    try:
+        if request.verification_code and request.session_id:
+            # Complete 2FA authentication
+            success = apple_2fa_handler.complete_2fa_auth(
+                request.session_id,
+                request.verification_code
+            )
+
+            if success:
+                return AppleAuth2FAResponse(
+                    requires_2fa=False,
+                    message="Authentication successful!"
+                )
+            else:
+                raise HTTPException(status_code=400, detail="Invalid verification code")
+
+        else:
+            # Start initial authentication
+            session_id, requires_2fa = apple_2fa_handler.start_auth_session(
+                request.username,
+                request.password
+            )
+
+            if requires_2fa:
+                return AppleAuth2FAResponse(
+                    requires_2fa=True,
+                    session_id=session_id,
+                    message="Please enter the verification code sent to your device"
+                )
+            else:
+                return AppleAuth2FAResponse(
+                    requires_2fa=False,
+                    message="Authentication successful!"
+                )
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# Additional job management endpoints
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel a running job"""
+    try:
+        success = job_manager.cancel_job(job_id)
+        if success:
+            return {"message": "Job cancelled successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Job not found or cannot be cancelled")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def retry_job(job_id: str):
+    """Retry a failed job"""
+    try:
+        new_job_id = job_manager.retry_job(job_id)
+        if new_job_id:
+            return {"message": "Job retry started", "new_job_id": new_job_id}
+        else:
+            raise HTTPException(status_code=404, detail="Job not found or cannot be retried")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/jobs/{job_id}")
+async def remove_job(job_id: str):
+    """Remove a job from the list"""
+    try:
+        success = job_manager.remove_job(job_id)
+        if success:
+            return {"message": "Job removed successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Job not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/jobs/clear-completed")
+async def clear_completed_jobs():
+    """Clear all completed and failed jobs"""
+    try:
+        count = job_manager.clear_completed_jobs()
+        return {"message": f"Cleared {count} completed jobs"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

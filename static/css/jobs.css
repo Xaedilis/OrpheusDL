@@ -1,0 +1,178 @@
+
+/* Job Management Styles */
+.jobs-controls {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.refresh-btn, .clear-btn {
+    background-color: #6c757d;
+}
+
+.refresh-btn:hover, .clear-btn:hover {
+    background-color: #5a6268;
+}
+
+.job-item {
+    border-radius: 8px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    padding: 15px;
+}
+
+.job-item:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.job-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.job-status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.status-pending { background-color: #fff3cd; color: #856404; }
+.status-running { background-color: #cce5ff; color: #004085; }
+.status-completed { background-color: #d4edda; color: #155724; }
+.status-failed { background-color: #f8d7da; color: #721c24; }
+.status-cancelled { background-color: #e2e3e5; color: #383d41; }
+
+.job-pending { background-color: #fff3cd; border: 1px solid #ffeaa7; }
+.job-running { background-color: #cce5ff; border: 1px solid #b3d9ff; }
+.job-completed { background-color: #d4edda; border: 1px solid #c3e6cb; }
+.job-failed { background-color: #f8d7da; border: 1px solid #f5c6cb; }
+.job-cancelled { background-color: #e2e3e5; border: 1px solid #dee2e6; }
+
+.job-progress {
+    margin: 10px 0;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: #007bff;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    margin-left: 10px;
+    font-size: 0.9em;
+    color: #6c757d;
+}
+
+.job-actions {
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.logs-btn {
+    background-color: #17a2b8;
+}
+
+.logs-btn:hover {
+    background-color: #138496;
+}
+
+.cancel-btn {
+    background-color: #dc3545;
+}
+
+.cancel-btn:hover {
+    background-color: #c82333;
+}
+
+.retry-btn {
+    background-color: #ffc107;
+    color: #212529;
+}
+
+.retry-btn:hover {
+    background-color: #e0a800;
+}
+
+.remove-btn {
+    background-color: #6c757d;
+}
+
+.remove-btn:hover {
+    background-color: #5a6268;
+}
+
+.logs-content {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 15px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    overflow-y: auto;
+    max-height: 400px;
+    white-space: pre-wrap;
+}
+
+.log-entry {
+    margin-bottom: 5px;
+    padding: 2px 0;
+}
+
+.log-timestamp {
+    color: #6c757d;
+    margin-right: 10px;
+}
+
+.log-level {
+    font-weight: bold;
+    margin-right: 10px;
+    min-width: 60px;
+    display: inline-block;
+}
+
+.log-info .log-level { color: #17a2b8; }
+.log-warning .log-level { color: #ffc107; }
+.log-error .log-level { color: #dc3545; }
+.log-debug .log-level { color: #6c757d; }
+
+.no-jobs {
+    text-align: center;
+    color: #6c757d;
+    font-style: italic;
+    padding: 40px;
+}
+
+.logs-controls {
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.refresh-logs-btn, .download-logs-btn {
+    background-color: #28a745;
+    font-size: 0.9em;
+    padding: 6px 12px;
+}
+
+.refresh-logs-btn:hover, .download-logs-btn:hover {
+    background-color: #218838;
+}
