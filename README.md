@@ -1,7 +1,5 @@
 <!-- PROJECT INTRO -->
 
-<img src='https://svgshare.com/i/__W.svg' title='Orfi_temporary' height="150">
-
 OrpheusDL
 =========
 
@@ -11,7 +9,6 @@ A modular music archival program
 ·
 [Request Feature](https://github.com/OrfiTeam/OrpheusDL/issues)
 
-
 ## Table of content
 
 - [About OrpheusDL](#about-orpheusdl)
@@ -19,21 +16,26 @@ A modular music archival program
     - [Prerequisites](#prerequisites)
     - [Installation](#installation)
 - [Usage](#usage)
+    - [Command Line](#command-line)
+    - [Web Interface](#web-interface)
+- [Web GUI Features](#web-gui-features)
+    - [Running the Web Interface](#running-the-web-interface)
+    - [Job Management](#job-management)
 - [Configuration](#configuration)
     - [Global/Formatting](#globalformatting)
         - [Format variables](#format-variables)
 - [Contact](#contact)
 - [Acknowledgements](#acknowledgements)
 
-
-
 <!-- ABOUT ORPHEUS -->
+
 ## About OrpheusDL
 
 OrpheusDL is a modular music archival tool written in Python which allows archiving from multiple different services.
 
 
 <!-- GETTING STARTED -->
+
 ## Getting Started
 
 Follow these steps to get a local copy of Orpheus up and running:
@@ -52,48 +54,115 @@ Follow these steps to get a local copy of Orpheus up and running:
    ```shell
    pip install -r requirements.txt
    ```
-3. Run the program at least once, or use this command to create the settings file
+3. For web interface support, install additional dependencies
+   ```shell
+   pip install fastapi uvicorn pydantic
+   ```
+4. Run the program at least once, or use this command to create the settings file
    ```shell
    python3 orpheus.py settings refresh
    ```
-4. Enter your credentials in `config/settings.json`
+5. Enter your credentials in `config/settings.json`
 
 <!-- USAGE EXAMPLES -->
+
 ## Usage
 
+### Command Line
+
 Just call `orpheus.py` with any link you want to archive, for example Qobuz:
-```shell
-python3 orpheus.py https://open.qobuz.com/album/c9wsrrjh49ftb
-```
+
+```shell 
+python3 orpheus.py [https://open.qobuz.com/album/c9wsrrjh49ftb](https://open.qobuz.com/album/c9wsrrjh49ftb)
+``` 
 
 Alternatively do a search (luckysearch to automatically select the first option):
+
 ```shell
 python3 orpheus.py search qobuz track darkside alan walker
-```
+``` 
 
 Or if you have the ID of what you want to download, use:
+
 ```shell
 python3 orpheus.py download qobuz track 52151405
-```
+``` 
+
+### Web Interface
+
+OrpheusDL now includes a modern web interface for easier searching and downloading:
+
+```shell
+python3 orpheus_web_app.py
+``` 
+
+Then open your browser to: http://localhost:8000
+
+## Web GUI Features
+
+The web interface provides:
+
+- 🔍 **Search Interface** - Search for tracks and albums across supported platforms
+- 🎵 **One-Click Downloads** - Download tracks and albums with a single click
+- 📊 **Job Management** - Monitor download progress with real-time status updates
+- 🌐 **Modern UI** - Clean, responsive interface that works on desktop and mobile
+- ⚡ **Background Processing** - Downloads run in the background with detailed logging
+
+### Running the Web Interface
+
+1. **Start the web server**
+   ```shell
+   python3 orpheus_web_app.py
+   ```
+
+2. **Access the interface**
+    - Open your browser to: http://localhost:8000
+    - API documentation available at: http://localhost:8000/docs
+
+3. **Using the interface**
+    - Enter search queries for tracks or albums
+    - Provide platform credentials when prompted
+    - Click download buttons to start downloads
+    - Monitor progress in the "Download Jobs" section
+
+### Job Management
+
+The web interface includes a comprehensive job management system:
+
+- **Real-time Status** - See download progress as it happens
+- **Job Queue** - Multiple downloads can run simultaneously
+- **Detailed Logs** - View complete download logs for troubleshooting
+- **Auto-refresh** - Job status updates automatically every 10 seconds
+- **Error Handling** - Failed downloads show detailed error messages
+
+**Job Statuses:**
+
+- `queued` - Job is waiting to start
+- `running` - Download is in progress
+- `completed` - Download finished successfully
+- `failed` - Download encountered an error
 
 <!-- CONFIGURATION -->
+
 ## Configuration
 
 You can customize every module from Orpheus individually and also set general/global settings which are active in every
 loaded module. You'll find the configuration file here: `config/settings.json`
 
 ### Global/General
+
 ```json5
 {
-    "download_path": "./downloads/",
-    "download_quality": "hifi",
-    "search_limit": 10
+  "download_path": "./downloads/",
+  "download_quality": "hifi",
+  "search_limit": 10
 }
-```
+``` 
 
 `download_path`: Set the absolute or relative output path with `/` as the delimiter
 
 `download_quality`: Choose one of the following settings:
+
 * "hifi": FLAC higher than 44.1/16 if available
 * "lossless": FLAC with 44.1/16 if available
 * "high": lossy codecs such as MP3, AAC, ... in a higher bitrate
@@ -104,21 +173,21 @@ loaded module. You'll find the configuration file here: `config/settings.json`
 
 `search_limit`: How many search results are shown
 
-
 ### Global/Formatting:
 
 ```json5
 {
-    "album_format": "{name}{explicit}",
-    "playlist_format": "{name}{explicit}",
-    "track_filename_format": "{track_number}. {name}",
-    "single_full_path_format": "{name}",
-    "enable_zfill": true,
-    "force_album_format": false
+  "album_format": "{name}{explicit}",
+  "playlist_format": "{name}{explicit}",
+  "track_filename_format": "{track_number}. {name}",
+  "single_full_path_format": "{name}",
+  "enable_zfill": true,
+  "force_album_format": false
 }
-```
+``` 
 
-`track_filename_format`: How tracks are formatted in albums and playlists. The relevant extension is appended to the end.
+`track_filename_format`: How tracks are formatted in albums and playlists. The relevant extension is appended to the
+end.
 
 `album_format`, `playlist_format`, `artist_format`: Base directories for their respective formats - tracks and cover
 art are stored here. May have slashes in it, for instance {artist}/{album}.
@@ -130,8 +199,7 @@ Instead, this has both the folder's name and the track's name.
 corresponding number has more than 2 digits
 
 `force_album_format`: Forces the `album_format` for tracks instead of the `single_full_path_format` and also
-uses `album_format` in the `playlist_format` folder 
-
+uses `album_format` in the `playlist_format` folder
 
 #### Format variables
 
@@ -150,7 +218,9 @@ uses `album_format` in the `playlist_format` folder
      [96kHz 24bit]
      [M]
     ```
- to the corresponding path (depending on the module)
+
+to the corresponding path (depending on the module)
+
 * `{explicit}` will add
     ```
      [E]
@@ -160,17 +230,8 @@ uses `album_format` in the `playlist_format` folder
 ### Global/Covers
 
 ```json5
-{
-    "embed_cover": true,
-    "main_compression": "high",
-    "main_resolution": 1400,
-    "save_external": false,
-    "external_format": "png",
-    "external_compression": "low",
-    "external_resolution": 3000,
-    "save_animated_cover": true
-}
-```
+{ "embed_cover": true, "main_compression": "high", "main_resolution": 1400, "save_external": false, "external_format": "png", "external_compression": "low", "external_resolution": 3000, "save_animated_cover": true }
+``` 
 
 | Option               | Info                                                                                     |
 |----------------------|------------------------------------------------------------------------------------------|
@@ -186,11 +247,8 @@ uses `album_format` in the `playlist_format` folder
 ### Global/Codecs
 
 ```json5
-{
-    "proprietary_codecs": false,
-    "spatial_codecs": true
-}
-```
+{ "proprietary_codecs": false, "spatial_codecs": true }
+``` 
 
 `proprietary_codecs`: Enable it to allow `MQA`, `E-AC-3 JOC` or `AC-4 IMS`
 
@@ -201,43 +259,31 @@ uses `album_format` in the `playlist_format` folder
 ### Global/Module_defaults
 
 ```json5
-{
-    "lyrics": "default",
-    "covers": "default",
-    "credits": "default"
-}
-```
+{ "lyrics": "default", "covers": "default", "credits": "default" }
+``` 
 
 Change `default` to the module name under `/modules` in order to retrieve `lyrics`, `covers` or `credits` from the
 selected module
 
 ### Global/Lyrics
+
 ```json5
 {
-    "embed_lyrics": true,
-    "embed_synced_lyrics": false,
-    "save_synced_lyrics": true
+  "embed_lyrics": true,
+  "embed_synced_lyrics": false,
+  "save_synced_lyrics": true
 }
 ```
 
-| Option              | Info                                                                                                                                                                |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| embed_lyrics        | Embeds the (unsynced) lyrics inside every track                                                                                                                     |
-| embed_synced_lyrics | Embeds the synced lyrics inside every track (needs `embed_lyrics` to be enabled) (required for [Roon](https://community.roonlabs.com/t/1-7-lyrics-tag-guide/85182)) |
-| save_synced_lyrics  | Saves the synced lyrics inside a  `.lrc` file in the same directory as the track with the same `track_format` variables                                             |
-
-<!-- Contact -->
+| Option | Info |
+| --- | --- |
+| embed_lyrics | Embeds the (unsynced) lyrics inside every track |
+| embed_synced_lyrics | Embeds the synced lyrics inside every track (needs to be enabled) (required for [Roon](https://community.roonlabs.com/t/1-7-lyrics-tag-guide/85182)) `embed_lyrics` |
+| save_synced_lyrics | Saves the synced lyrics inside a file in the same directory as the track with the same variables `.lrc``track_format` |
 ## Contact
-
 OrfiDev (Project Lead) - [@OrfiDev](https://github.com/OrfiTeam)
-
 Dniel97 (Current Lead Developer) - [@Dniel97](https://github.com/Dniel97)
-
 Project Link: [Orpheus Public GitHub Repository](https://github.com/OrfiTeam/OrpheusDL)
-
-
-
-<!-- ACKNOWLEDGEMENTS -->
 ## Acknowledgements
-* Chimera by Aesir - the inspiration to the project
-* [Icon modified from a freepik image](https://www.freepik.com/)
+- Chimera by Aesir - the inspiration to the project
+- [Icon modified from a freepik image](https://www.freepik.com/)

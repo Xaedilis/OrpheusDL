@@ -1,0 +1,17 @@
+<div id="twoFactorModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Two-Factor Authentication Required</h3>
+            <span class="close" onclick="cancel2FA()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p>Please enter the verification code sent to your Apple device:</p>
+            <input type="text" id="verificationCode" placeholder="Enter 6-digit code" maxlength="6"
+                   style="width: 100%; padding: 10px; margin: 10px 0; font-size: 18px; text-align: center;">
+            <div style="text-align: center;">
+                <button onclick="submit2FA()" class="btn btn-primary">Verify</button>
+                <button onclick="cancel2FA()" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
