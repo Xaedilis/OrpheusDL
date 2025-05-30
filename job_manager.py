@@ -97,6 +97,19 @@ class JobManager:
         job = self.get_job(job_id)
         return job.logs if job else []
 
+    def clear_completed_jobs(self) -> int:
+        """Clear all completed and failed jobs, return count of cleared jobs"""
+        with self.job_lock:
+            jobs_to_remove = []
+            for job_id, job in self.jobs.items():
+                if job.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                    jobs_to_remove.append(job_id)
+
+            for job_id in jobs_to_remove:
+                del self.jobs[job_id]
+
+            return len(jobs_to_remove)
+
     def start_download_job(self, job_id: str):
         """Start a download job in the background"""
 

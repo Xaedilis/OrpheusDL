@@ -43,22 +43,20 @@ function stopAutoRefresh() {
 async function refreshJobs() {
     try {
         const response = await fetch('/api/jobs');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         const data = await response.json();
 
-        const jobsDiv = document.getElementById('jobsResults');
-        
-        if (data.jobs && data.jobs.length > 0) {
-            renderJobsList(data.jobs);
-        } else {
-            jobsDiv.innerHTML = '<p class="no-jobs">No jobs found.</p>';
-        }
+        // Update your UI with the jobs data
+        updateJobsDisplay(data.jobs);
 
     } catch (error) {
-        console.error('Error refreshing jobs:', error);
-        document.getElementById('jobsResults').innerHTML = 
-            `<p style="color: red;">Error loading jobs: ${error.message}</p>`;
+        console.error('Failed to fetch jobs:', error);
+        throw error; // Re-throw so clearCompletedJobs can catch it
     }
 }
+
 
 function renderJobsList(jobs) {
     const jobsDiv = document.getElementById('jobsResults');
@@ -311,7 +309,16 @@ async function clearCompletedJobs() {
             });
             
             if (response.ok) {
-                refreshJobs();
+                console.log('Jobs cleared successfully, refreshing...');
+                try {
+                    await refreshJobs();
+                    console.log('Jobs refreshed successfully');
+                } catch (refreshError) {
+                    console.error('Error refreshing jobs:', refreshError);
+                    alert('Jobs were cleared but failed to refresh the list: ' + refreshError.message);
+                    // Optionally reload the page as fallback
+                    // window.location.reload();
+                }
             } else {
                 throw new Error('Failed to clear completed jobs');
             }
@@ -321,6 +328,7 @@ async function clearCompletedJobs() {
         }
     }
 }
+
 
 // Close modal when clicking outside
 window.onclick = function(event) {

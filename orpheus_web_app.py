@@ -20,7 +20,6 @@ from models.DownloadRequest import DownloadRequest
 from models.JobResponse import JobResponse
 from models.MultiFormatDownloadRequest import MultiFormatDownloadRequest
 from models.Searchrequest import SearchRequest
-from modules.applemusic.AppleAuthHandler import apple_2fa_handler
 
 # Initialize FastAPI app
 app = FastAPI(title="Orpheus Music Downloader API", version="1.0.0")
@@ -55,27 +54,6 @@ async def search_tracks(request: SearchRequest):
     """Search for tracks with 2FA support for Apple Music"""
     try:
         platform = request.platforms[0]
-
-        if platform == "apple":
-            # For Apple Music, check if we need 2FA
-            auth_request = AppleAuthRequest(
-                username=request.username,
-                password=request.password,
-                verification_code=request.verification_code
-            )
-
-            # This will handle the 2FA flow if needed
-            auth_result = await authenticate_apple(auth_request)
-
-            if auth_result.requires_2fa:
-                raise HTTPException(
-                    status_code=428,  # Precondition Required
-                    detail={
-                        "message": "2FA verification required",
-                        "session_id": auth_result.session_id,
-                        "requires_2fa": True
-                    }
-                )
 
         # Continue with normal search if auth is complete
         results = await orpheus_manager.search_with_credentials(
@@ -235,49 +213,6 @@ async def get_platforms():
         return {"platforms": platforms}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/auth/apple", response_model=AppleAuth2FAResponse)
-async def authenticate_apple(request: AppleAuthRequest):
-    """Handle Apple Music authentication with 2FA support"""
-    try:
-        if request.verification_code and request.session_id:
-            # Complete 2FA authentication
-            success = apple_2fa_handler.complete_2fa_auth(
-                request.session_id,
-                request.verification_code
-            )
-
-            if success:
-                return AppleAuth2FAResponse(
-                    requires_2fa=False,
-                    message="Authentication successful!"
-                )
-            else:
-                raise HTTPException(status_code=400, detail="Invalid verification code")
-
-        else:
-            # Start initial authentication
-            session_id, requires_2fa = apple_2fa_handler.start_auth_session(
-                request.username,
-                request.password
-            )
-
-            if requires_2fa:
-                return AppleAuth2FAResponse(
-                    requires_2fa=True,
-                    session_id=session_id,
-                    message="Please enter the verification code sent to your device"
-                )
-            else:
-                return AppleAuth2FAResponse(
-                    requires_2fa=False,
-                    message="Authentication successful!"
-                )
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 
 # Additional job management endpoints
 @app.post("/api/jobs/{job_id}/cancel")
