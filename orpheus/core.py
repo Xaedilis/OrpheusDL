@@ -89,6 +89,12 @@ class Orpheus:
                 "conversion_flags": {
                     "flac": {
                         "compression_level": "5"
+                    },
+                    "mp3": {
+                        "qscale:a": "0"
+                    },
+                    "aac": {
+                        "audio_bitrate": "256k"
                     }
                 },
                 "conversion_keep_original": False,
