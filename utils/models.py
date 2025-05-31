@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, field
 from enum import Flag, auto
 from types import ClassMethodDescriptorType, FunctionType
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Union
 
 from utils.utils import read_temporary_setting, set_temporary_setting
 
@@ -36,17 +36,18 @@ class CodecEnum(Flag):
     FLAC = auto()  # Lossless, free
     ALAC = auto()  # Lossless, free, useless
     WAV = auto()  # Lossless (uncompressed), free, useless
-    MQA = auto()  # Lossy, proprietary, terrible
-    OPUS = auto()  # Lossy, free
+    AIFF = auto() # Lossless (uncompressed), free, useless
+    MQA = auto() # Lossy (technically lossless), proprietary
+    OPUS = auto() # Lossy, free
     VORBIS = auto()  # Lossy, free
     MP3 = auto()  # Lossy, not fully free
     AAC = auto()  # Lossy, requires license
-    HEAAC = auto()  # Lossy, requires license
-    MHA1 = auto()  # Lossy, requires license, spatial
-    MHM1 = auto()  # Lossy, requires license, spatial
-    EAC3 = auto()  # Specifically E-AC-3 JOC # Lossy, proprietary, spatial
-    AC4 = auto()  # Specifically AC-4 IMS # Lossy, proprietary, spatial
-    AC3 = auto()  # Lossy, proprietary, spatial kinda
+    HEAAC = auto() # Lossy, requires license
+    MHA1 = auto() # Lossy, spatial, proprietary
+    MHM1 = auto() # Lossy, spatial, proprietary
+    EAC3 = auto() # Lossy, spatial, proprietary
+    AC4 = auto() # Lossy, spatial, proprietary
+    AC3 = auto() # Lossy, spatial, proprietary
     NONE = auto()  # No codec
 
 
@@ -57,6 +58,11 @@ class ContainerEnum(Flag):
     ogg = auto()
     m4a = auto()
     mp3 = auto()
+    aiff = auto()
+    eac3 = auto()
+    ac4 = auto()
+    ac3 = auto()
+    mp4 = auto()
 
 
 @dataclass
@@ -85,17 +91,18 @@ codec_data = {
     CodecEnum.FLAC:   CodecData(pretty_name='FLAC',             container=ContainerEnum.flac, lossless=True,  spatial=False, proprietary=False),
     CodecEnum.ALAC:   CodecData(pretty_name='ALAC',             container=ContainerEnum.m4a,  lossless=True,  spatial=False, proprietary=False),
     CodecEnum.WAV:    CodecData(pretty_name='WAVE',             container=ContainerEnum.wav,  lossless=True,  spatial=False, proprietary=False),
-    CodecEnum.MQA:    CodecData(pretty_name='MQA',              container=ContainerEnum.flac, lossless=False, spatial=False, proprietary=True),
+    CodecEnum.AIFF:   CodecData(pretty_name='AIFF',             container=ContainerEnum.aiff, lossless=True,  spatial=False, proprietary=False),
+    CodecEnum.MQA:    CodecData(pretty_name='MQA',              container=ContainerEnum.flac, lossless=True,  spatial=False, proprietary=True), # lossless=True because it is stored in FLAC
     CodecEnum.OPUS:   CodecData(pretty_name='Opus',             container=ContainerEnum.opus, lossless=False, spatial=False, proprietary=False),
     CodecEnum.VORBIS: CodecData(pretty_name='Vorbis',           container=ContainerEnum.ogg,  lossless=False, spatial=False, proprietary=False),
     CodecEnum.MP3:    CodecData(pretty_name='MP3',              container=ContainerEnum.mp3,  lossless=False, spatial=False, proprietary=False),
     CodecEnum.AAC:    CodecData(pretty_name='AAC-LC',           container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=False),
-    CodecEnum.HEAAC:  CodecData(pretty_name='HE-AAC',           container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=False),
-    CodecEnum.MHA1:   CodecData(pretty_name='MPEG-H 3D (MHA1)', container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=False),
-    CodecEnum.MHM1:   CodecData(pretty_name='MPEG-H 3D (MHM1)', container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=False),
-    CodecEnum.EAC3:   CodecData(pretty_name='E-AC-3 JOC',       container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
-    CodecEnum.AC4:    CodecData(pretty_name='AC-4 IMS',         container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
-    CodecEnum.AC3:    CodecData(pretty_name='Dolby Digital',    container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.HEAAC:  CodecData(pretty_name='HE-AAC',           container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=True),
+    CodecEnum.MHA1:   CodecData(pretty_name='MPEG-H 3D Audio',  container=ContainerEnum.m4a,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.MHM1:   CodecData(pretty_name='MPEG-H 3D Audio',  container=ContainerEnum.mp4,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.EAC3:   CodecData(pretty_name='Dolby Digital+',   container=ContainerEnum.eac3, lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.AC4:    CodecData(pretty_name='Dolby AC-4 IMS',   container=ContainerEnum.ac4,  lossless=False, spatial=True,  proprietary=True),
+    CodecEnum.AC3:    CodecData(pretty_name='Dolby Digital',    container=ContainerEnum.ac3,  lossless=False, spatial=False, proprietary=True), # AC3 is technically not spatial
     CodecEnum.NONE:   CodecData(pretty_name='Error',            container=ContainerEnum.m4a,  lossless=False, spatial=False, proprietary=False)
 }  # Note: spatial has priority over proprietary when deciding if a codec is enabled
 
@@ -121,7 +128,7 @@ class TemporarySettingsController:
         else:
             raise Exception('Invalid temporary setting requested')
 
-    def set(self, setting: str, value: str or object, setting_type='custom'):
+    def set(self, setting: str, value: Union[str, object], setting_type='custom'):
         if setting_type == 'custom':
             set_temporary_setting(self.settings_location, self.module, 'custom_data', setting, value)
         elif setting_type == 'global':
@@ -163,7 +170,7 @@ class ModuleInformation:
     session_settings: Optional[dict] = field(default_factory=dict)
     session_storage_variables: Optional[list] = None
     flags: Optional[ModuleFlags] = field(default_factory=dict)
-    netlocation_constant: Optional[str] or Optional[list] = field(default_factory=list) # not sure if this works with python 3.7/3.8
+    netlocation_constant: Optional[Union[str, list]] = field(default_factory=list) # Corrected type hint
     # note that by setting netlocation_constant to setting.X, it will use that setting instead
     url_constants: Optional[dict] = None
     test_url: Optional[str] = None
