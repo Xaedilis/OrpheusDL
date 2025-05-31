@@ -879,77 +879,81 @@ class Downloader:
             old_codec_data = codec_data[codec]
             new_codec = conversions[codec]
             new_codec_data = codec_data[new_codec]
-            self.print(f'Converting to {new_codec_data.pretty_name}')
-                
-            if old_codec_data.spatial or new_codec_data.spatial:
-                self.print('Warning: converting spacial formats is not allowed, skipping')
-            elif not old_codec_data.lossless and new_codec_data.lossless and not self.global_settings['advanced']['enable_undesirable_conversions']:
-                self.print('Warning: Undesirable lossy-to-lossless conversion detected, skipping')
-            elif not old_codec_data and not self.global_settings['advanced']['enable_undesirable_conversions']:
-                self.print('Warning: Undesirable lossy-to-lossy conversion detected, skipping')
-            else:
-                if not old_codec_data.lossless and new_codec_data.lossless:
-                    self.print('Warning: Undesirable lossy-to-lossless conversion')
-                elif not old_codec_data:
-                    self.print('Warning: Undesirable lossy-to-lossy conversion')
 
-                try:
-                    conversion_flags = {CodecEnum[k.upper()]:v for k,v in self.global_settings['advanced']['conversion_flags'].items()}
-                except:
-                    conversion_flags = {}
-                    self.print('Warning: conversion_flags setting is invalid, using defaults')
+            if codec == new_codec:
+                pass
+            else:
+                self.print(f'Converting to {new_codec_data.pretty_name}')
                 
-                conv_flags = conversion_flags[new_codec] if new_codec in conversion_flags else {}
-                temp_track_location = f'{self.create_temp_filename()}.{new_codec_data.container.name}'
-                new_track_location = f'{track_location_name}.{new_codec_data.container.name}'
-                
-                stream: ffmpeg = ffmpeg.input(track_location, hide_banner=None, y=None)
-                # capture_stderr is required for the error output to be captured
-                try:
+                if old_codec_data.spatial or new_codec_data.spatial:
+                    self.print('Warning: converting spacial formats is not allowed, skipping')
+                elif not old_codec_data.lossless and new_codec_data.lossless and not self.global_settings['advanced']['enable_undesirable_conversions']:
+                    self.print('Warning: Undesirable lossy-to-lossless conversion detected, skipping')
+                elif not old_codec_data and not self.global_settings['advanced']['enable_undesirable_conversions']:
+                    self.print('Warning: Undesirable lossy-to-lossy conversion detected, skipping')
+                else:
+                    if not old_codec_data.lossless and new_codec_data.lossless:
+                        self.print('Warning: Undesirable lossy-to-lossless conversion')
+                    elif not old_codec_data:
+                        self.print('Warning: Undesirable lossy-to-lossy conversion')
+
+                    try:
+                        conversion_flags = {CodecEnum[k.upper()]:v for k,v in self.global_settings['advanced']['conversion_flags'].items()}
+                    except:
+                        conversion_flags = {}
+                        self.print('Warning: conversion_flags setting is invalid, using defaults')
+                    
+                    conv_flags = conversion_flags[new_codec] if new_codec in conversion_flags else {}
+                    temp_track_location = f'{self.create_temp_filename()}.{new_codec_data.container.name}'
+                    new_track_location = f'{track_location_name}.{new_codec_data.container.name}'
+                    
+                    stream: ffmpeg = ffmpeg.input(track_location, hide_banner=None, y=None)
                     # capture_stderr is required for the error output to be captured
-                    stream.output(
-                        temp_track_location,
-                        acodec=new_codec.name.lower(),
-                        vn=None,  # Ignore video stream
-                        **conv_flags,
-                        loglevel='error'
-                    ).run(capture_stdout=True, capture_stderr=True)
-                except Error as e:
-                    error_msg = e.stderr.decode('utf-8')
-                    # get the error message from ffmpeg and search foe the non-experimental encoder
-                    encoder = re.search(r"(?<=non experimental encoder ')\[^'\]+", error_msg)
-                    if encoder:
-                        self.print(f'Encoder {new_codec.name.lower()} is experimental, trying {encoder.group(0)}')
-                        # try to use the non-experimental encoder
+                    try:
+                        # capture_stderr is required for the error output to be captured
                         stream.output(
                             temp_track_location,
-                            acodec=encoder.group(0),
-                            vn=None,  # Ignore video stream here as well
+                            acodec=new_codec.name.lower(),
+                            vn=None,  # Ignore video stream
                             **conv_flags,
                             loglevel='error'
-                        ).run(capture_stdout=True, capture_stderr=True) # Added capture_stdout/stderr for consistency
+                        ).run(capture_stdout=True, capture_stderr=True)
+                    except Error as e:
+                        error_msg = e.stderr.decode('utf-8')
+                        # get the error message from ffmpeg and search foe the non-experimental encoder
+                        encoder = re.search(r"(?<=non experimental encoder ')\[^'\]+", error_msg)
+                        if encoder:
+                            self.print(f'Encoder {new_codec.name.lower()} is experimental, trying {encoder.group(0)}')
+                            # try to use the non-experimental encoder
+                            stream.output(
+                                temp_track_location,
+                                acodec=encoder.group(0),
+                                vn=None,  # Ignore video stream here as well
+                                **conv_flags,
+                                loglevel='error'
+                            ).run(capture_stdout=True, capture_stderr=True) # Added capture_stdout/stderr for consistency
+                        else:
+                            # raise any other occurring error
+                            raise Exception(f'ffmpeg error converting to {new_codec.name.lower()}:\n{error_msg}')
+
+                    # remove file if it requires an overwrite, maybe os.replace would work too?
+                    if track_location == new_track_location:
+                        silentremove(track_location)
+                        # just needed so it won't get deleted
+                        track_location = temp_track_location
+
+                    # move temp_file to new_track_location and delete temp file
+                    shutil.move(temp_track_location, new_track_location)
+                    silentremove(temp_track_location)
+
+                    if self.global_settings['advanced']['conversion_keep_original']:
+                        old_track_location = track_location
+                        old_container = container
                     else:
-                        # raise any other occurring error
-                        raise Exception(f'ffmpeg error converting to {new_codec.name.lower()}:\n{error_msg}')
+                        silentremove(track_location)
 
-                # remove file if it requires an overwrite, maybe os.replace would work too?
-                if track_location == new_track_location:
-                    silentremove(track_location)
-                    # just needed so it won't get deleted
-                    track_location = temp_track_location
-
-                # move temp_file to new_track_location and delete temp file
-                shutil.move(temp_track_location, new_track_location)
-                silentremove(temp_track_location)
-
-                if self.global_settings['advanced']['conversion_keep_original']:
-                    old_track_location = track_location
-                    old_container = container
-                else:
-                    silentremove(track_location)
-
-                container = new_codec_data.container    
-                track_location = new_track_location
+                    container = new_codec_data.container    
+                    track_location = new_track_location
 
         # Tagging starts here
         self.print('Tagging file')
