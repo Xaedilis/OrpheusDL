@@ -98,6 +98,7 @@ class Orpheus:
                     }
                 },
                 "conversion_keep_original": False,
+                "ffmpeg_path": "ffmpeg",
                 "cover_variance_threshold": 8,
                 "debug_mode": False,
                 "disable_subscription_checks": False,
@@ -279,7 +280,7 @@ class Orpheus:
         for i in self.extension_list:
             extension_information: ExtensionInformation = getattr(importlib.import_module(f'extensions.{i}.interface'), 'extension_settings', None)
             extension_type = extension_information.extension_type
-            extension_settings[extension_type] = {} if 'extension_type' not in extension_settings else extension_settings[extension_type]
+            extension_settings[extension_type] = {} if 'extension_type' not in extension_information else extension_information[extension_type]
             old_settings['extensions'][extension_type] = {} if extension_type not in old_settings['extensions'] else old_settings['extensions'][extension_type]
             extension_settings[extension_type][i] = {} # This code regenerates the settings
             for j in extension_information.settings:
