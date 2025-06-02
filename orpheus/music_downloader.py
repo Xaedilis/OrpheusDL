@@ -553,14 +553,27 @@ class Downloader:
         if self.global_settings['formatting']['force_album_format'] and self.download_mode in {
             DownloadTypeEnum.track, DownloadTypeEnum.playlist}:
             # Fetch every needed album_info tag and create an album_location
-            album_info: AlbumInfo = self.service.get_album_info(track_info.album_id)
-            # Save the playlist path to save all the albums in the playlist path
-            path = self.path if album_location == '' else album_location
-            album_location = self._create_album_location(path, track_info.album_id, album_info)
-            album_location = album_location.replace('\\', '/')
-
-            # Download booklet, animated album cover and album cover if present
-            self._download_album_files(album_location, album_info)
+            album_info: AlbumInfo
+            if self.service_name in ['soundcloud', 'deezer']: # Check if it's SoundCloud or Deezer
+                album_info = self.service.get_album_info(track_info.album_id, data={}) # Pass data={}
+            else:
+                album_info = self.service.get_album_info(track_info.album_id)
+            
+            if album_info: # Only proceed if album_info was successfully fetched
+                # Save the playlist path to save all the albums in the playlist path
+                path_for_album = self.path if album_location == '' else album_location
+                new_album_location = self._create_album_location(path_for_album, track_info.album_id, album_info)
+                new_album_location = new_album_location.replace('\\', '/')
+                # Download booklet, animated album cover and album cover if present
+                self._download_album_files(new_album_location, album_info)
+                # Update album_location to the new path if it was created
+                album_location = new_album_location 
+            else:
+                # If album_info is None, use the existing album_location (which might be just self.path or a playlist path)
+                # or ensure album_location is set to a sensible default if it was empty.
+                if not album_location: # If album_location was empty (e.g. direct track download, not part of playlist)
+                    album_location = self.path
+                self.oprinter.oprint(f"[Music Downloader] force_album_format is ON, but no valid album_info found for track {track_id} (album_id: '{track_info.album_id}'). Using path: {album_location}", drop_level=1)
 
         if self.download_mode is DownloadTypeEnum.track and not self.global_settings['formatting']['force_album_format']:  # Python 3.10 can't become popular sooner, ugh
             track_location_name = os.path.join(self.path, self.global_settings['formatting']['single_full_path_format'].format(**track_tags))
