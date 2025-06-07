@@ -320,6 +320,7 @@ class AlbumInfo:
 @dataclass
 class ArtistInfo:
     name: str
+    artist_id: Optional[str] = None
     albums: Optional[list] = field(default_factory=list)
     album_extra_kwargs: Optional[dict] = field(default_factory=dict)
     tracks: Optional[list] = field(default_factory=list)

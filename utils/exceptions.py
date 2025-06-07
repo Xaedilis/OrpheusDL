@@ -31,3 +31,20 @@ class ModuleSettingsNotSet(Exception):
 
 class TagSavingFailure(Exception):
     pass
+
+# Add definitions for AuthenticationError and DownloadError
+class AuthenticationError(Exception):
+    """Custom exception for authentication failures in modules."""
+    pass
+
+class DownloadError(Exception):
+    """Base exception for download-related errors"""
+    pass
+
+class TrackUnavailableError(DownloadError):
+    """Raised when a track is unavailable for download"""
+    pass
+
+class ArtworkError(DownloadError):
+    """Raised for artwork-related errors"""
+    pass

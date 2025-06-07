@@ -124,7 +124,13 @@ class Downloader:
         self.print(f'Number of tracks: {number_of_tracks!s}')
         self.print(f'Service: {self.module_settings[self.service_name].service_name}')
         
+        # Sanitize and shorten playlist name for filesystem
+        safe_playlist_name = sanitise_name(playlist_info.name)
+        if len(safe_playlist_name) > 50: # Truncate long names
+            safe_playlist_name = safe_playlist_name[:50]
+
         playlist_tags = {k: sanitise_name(v) for k, v in asdict(playlist_info).items()}
+        playlist_tags['name'] = safe_playlist_name # Use the safe name for path formatting
         playlist_tags['explicit'] = ' [E]' if playlist_info.explicit else ''
         playlist_path_formatted_name = self.global_settings['formatting']['playlist_format'].format(**playlist_tags)
         playlist_path = os.path.join(self.path, playlist_path_formatted_name)
@@ -149,7 +155,7 @@ class Downloader:
                 raise ValueError(f'Invalid value for paths_m3u: "{self.global_settings["playlist"]["paths_m3u"]}",'
                                  f' must be either "absolute" or "relative"')
 
-            m3u_playlist_path = playlist_path + f'{playlist_tags["name"]}.m3u'
+            m3u_playlist_path = os.path.join(playlist_path, f'{safe_playlist_name}.m3u')
 
             # create empty file
             with open(m3u_playlist_path, 'w', encoding='utf-8') as f:
@@ -408,18 +414,23 @@ class Downloader:
             fetch_credited_albums_value = self.global_settings['artist_downloading']['return_credited_albums']
 
         # Call get_artist_info based on service-specific signature requirements
-        if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource']:
-            # These services require 'get_credited_albums' (the boolean value) as the second positional argument.            
-            artist_info: ArtistInfo = self.service.get_artist_info(artist_id, fetch_credited_albums_value, **prepared_kwargs)
-        elif service_name_lower == 'spotify':
-            # Spotify handles 'return_credited_albums' as a keyword argument.
-            prepared_kwargs['return_credited_albums'] = fetch_credited_albums_value
-            artist_info: ArtistInfo = self.service.get_artist_info(artist_id, **prepared_kwargs)
-        else:
-            # For any other unhandled services.
-            # Assume they don't need 'get_credited_albums' positionally or as a specific keyword.
-            # This branch may need refinement if other services show different signature needs.
-            artist_info: ArtistInfo = self.service.get_artist_info(artist_id, **prepared_kwargs)
+        try:
+            if service_name_lower in ['deezer', 'qobuz', 'soundcloud', 'tidal', 'beatport', 'beatsource']:
+                # These services require 'get_credited_albums' (the boolean value) as the second positional argument.            
+                artist_info: ArtistInfo = self.service.get_artist_info(artist_id, fetch_credited_albums_value, **prepared_kwargs)
+            elif service_name_lower == 'spotify':
+                # Spotify handles 'return_credited_albums' as a keyword argument.
+                prepared_kwargs['return_credited_albums'] = fetch_credited_albums_value
+                artist_info: ArtistInfo = self.service.get_artist_info(artist_id, **prepared_kwargs)
+            else:
+                # For any other unhandled services.
+                # Assume they don't need 'get_credited_albums' positionally or as a specific keyword.
+                # This branch may need refinement if other services show different signature needs.
+                artist_info: ArtistInfo = self.service.get_artist_info(artist_id, **prepared_kwargs)
+        except Exception as e:
+            self.print(f"Failed to retrieve artist info for ID {artist_id}: {e}", drop_level=1)
+            self.print(f"=== Artist {artist_id} failed ===", drop_level=1)
+            return
 
         artist_name = artist_info.name
 
@@ -733,6 +744,15 @@ class Downloader:
                     else:
                         logging.error(f"Jiosaavn: track_info_obj or its download_extra_kwargs are missing/invalid for track {kwargs_for_download.get('track_id_str')}.")
                         download_info = None
+                elif service_name_lower == 'applemusic': # Added Apple Music specific handling
+                    download_info: TrackDownloadInfo = self.service.get_track_download(
+                        track_id=kwargs_for_download["track_id_str"],
+                        quality_tier=kwargs_for_download["quality_tier"],
+                        # Pass other relevant kwargs if Apple Music module uses them via **kwargs
+                        # For now, only explicit ones. The rest of kwargs_for_download 
+                        # are implicitly ignored by this specific call if not in AM's **kwargs.
+                        # If AM module needs more from kwargs_for_download, they should be added here or AM's **kwargs used.
+                    )
                 else: # For Spotify and other modules that might accept **kwargs or the specific new ones
                     download_info: TrackDownloadInfo = self.service.get_track_download(
                         **kwargs_for_download
@@ -749,6 +769,10 @@ class Downloader:
                 self.print("Track deferred due to detected rate limit.")
                 logging.warning(f"Track {actual_id_str} deferred due to Spotify rate limit.")
                 return "RATE_LIMITED"
+            except TrackUnavailableError as e:
+                self.print(f"{e}", drop_level=1)
+                self.print(f'=== Track {actual_id_str} failed (Unavailable) ===', drop_level=1)
+                return # Exit the function to prevent further processing
             except Exception as e:
                 if attempt < max_retries - 1:
                     logging.warning(f"Track download attempt {attempt + 1} failed for {actual_id_str} with error: {str(e)}. Retrying in {retry_delay} seconds...")

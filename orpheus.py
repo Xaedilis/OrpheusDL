@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 import argparse
 import re
@@ -142,7 +144,7 @@ def main():
                         if selection < 0 or selection >= len(items): raise Exception('Invalid selection')
                         print()
                     selected_item: SearchResult = items[selection]
-                    media_to_download = {modulename: [MediaIdentification(media_type=query_type, media_id=selected_item.result_id, extra_kwargs=selected_item.extra_kwargs)]}
+                    media_to_download = {modulename: [MediaIdentification(media_type=query_type, media_id=selected_item.result_id, extra_kwargs=selected_item.extra_kwargs or {})]}
                 elif modulename == 'multi':
                     return  # TODO
                 else:
