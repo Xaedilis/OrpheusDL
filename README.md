@@ -29,7 +29,7 @@ This fork enables downloading from Spotify
 
 <!-- ABOUT ORPHEUS -->
 ## About OrpheusDL
-This fork enables downloading from Spotify.
+This fork enables downloading from Spotify & Apple Music.
 OrpheusDL is a modular music archival tool written in Python which allows archiving from multiple different services.
 
 
@@ -44,11 +44,11 @@ Follow these steps to get a local copy of Orpheus up and running:
 
 ### Installation
 
-[![Watch how to install](https://i.imgur.com/zGeverP.png)](https://youtu.be/AGsYTQuO7nk)
+[![Watch how to install](https://i.imgur.com/pNqYcYh.png)](https://youtu.be/AGsYTQuO7nk)
 
 1. Clone the repo
     ```shell
-    git clone https://github.com/bascurtiz/OrpheusDL.git && cd OrpheusDL
+    git clone https://github.com/bascurtiz/OrpheusDL && cd OrpheusDL
     ```
 2. Install all requirements
    ```shell
@@ -56,7 +56,7 @@ Follow these steps to get a local copy of Orpheus up and running:
    ```
 3. Run the program at least once, or use this command to create the settings file
    ```shell
-   python3 orpheus.py settings refresh
+   python orpheus.py settings refresh
    ```
 4. Enter your credentials in `config/settings.json`
 
@@ -65,17 +65,17 @@ Follow these steps to get a local copy of Orpheus up and running:
 
 Just call `orpheus.py` with any link you want to archive, for example Qobuz:
 ```shell
-python3 orpheus.py https://open.qobuz.com/album/c9wsrrjh49ftb
+python orpheus.py https://open.qobuz.com/album/c9wsrrjh49ftb
 ```
 
 Alternatively do a search (luckysearch to automatically select the first option):
 ```shell
-python3 orpheus.py search qobuz track darkside alan walker
+python orpheus.py search qobuz track darkside alan walker
 ```
 
 Or if you have the ID of what you want to download, use:
 ```shell
-python3 orpheus.py download qobuz track 52151405
+python orpheus.py download qobuz track 52151405
 ```
 
 <!-- CONFIGURATION -->
