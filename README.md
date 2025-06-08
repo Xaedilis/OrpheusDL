@@ -51,7 +51,7 @@ Follow these steps to get a local copy of Orpheus up and running:
     ```
 2. Install all requirements
    ```shell
-   pip install -r requirements.txt
+   pip install --upgrade --ignore-installed -r requirements.txt
    ```
 3. Run the program at least once, or use this command to create the settings file
    ```shell
