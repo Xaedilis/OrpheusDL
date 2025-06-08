@@ -5,7 +5,7 @@
 OrpheusDL
 =========
 
-This fork enables downloading from Spotify
+This fork enables downloading from Spotify & Apple Music
 
 [Report Bug](https://github.com/bascurtiz/OrpheusDL/issues)
 ·
@@ -29,7 +29,6 @@ This fork enables downloading from Spotify
 
 <!-- ABOUT ORPHEUS -->
 ## About OrpheusDL
-This fork enables downloading from Spotify & Apple Music.
 OrpheusDL is a modular music archival tool written in Python which allows archiving from multiple different services.
 
 
