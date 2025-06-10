@@ -538,6 +538,7 @@ class Downloader:
         self.set_indent_number(indent_level)
         # Extract the string ID reliably from track_info if possible
         actual_id_str = track_info.download_extra_kwargs.get('track_id', str(track_id)) 
+        self.oprinter.oprint("")  # Add blank line before track download message
         self.print(f'=== Downloading track {track_info.name} ({actual_id_str}) ===', drop_level=1)
 
         if self.download_mode is not DownloadTypeEnum.album and track_info.album: self.print(f'Album: {track_info.album} ({track_info.album_id})')
@@ -1035,8 +1036,7 @@ class Downloader:
                 pause_seconds = 30
         
         # Pause if service is spotify AND pause > 0 AND (part of multi-track download OR downloading artist tracks)
-        if pause_seconds > 0 and self.service_name == 'spotify' and (number_of_tracks > 1 or self.download_mode is DownloadTypeEnum.artist):
-            self.oprinter.oprint("")  # Add blank line before pause message
+        if pause_seconds > 0 and self.service_name == 'spotify' and (number_of_tracks > 1 or self.download_mode is DownloadTypeEnum.artist):            
             self.oprinter.oprint(f"Pausing for {pause_seconds} seconds before next download attempt (to avoid rate limiting)...")
             time.sleep(pause_seconds)        
 
