@@ -1036,6 +1036,7 @@ class Downloader:
         
         # Pause if service is spotify AND pause > 0 AND (part of multi-track download OR downloading artist tracks)
         if pause_seconds > 0 and self.service_name == 'spotify' and (number_of_tracks > 1 or self.download_mode is DownloadTypeEnum.artist):
+            self.oprinter.oprint("")  # Add blank line before pause message
             self.oprinter.oprint(f"Pausing for {pause_seconds} seconds before next download attempt (to avoid rate limiting)...")
             time.sleep(pause_seconds)        
 
