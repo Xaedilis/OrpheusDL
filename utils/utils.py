@@ -19,7 +19,7 @@ def create_requests_session():
     session_.mount('https://', HTTPAdapter(max_retries=retries))
     return session_
 
-sanitise_name = lambda name : re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[ \t]+$', '', str(name).rstrip()))) if name else ''
+sanitise_name = lambda name: re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[\x00-\x1F\x7F]', '', str(name).strip()))) if name else ''
 
 
 def fix_byte_limit(path: str, byte_limit=250):
