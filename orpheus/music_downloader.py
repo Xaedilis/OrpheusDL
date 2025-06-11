@@ -299,9 +299,7 @@ class Downloader:
 
     def _download_album_files(self, album_path: str, album_info: AlbumInfo):
         if album_info.cover_url and self.global_settings['covers']['save_external']:
-            self.print('Downloading album cover')
             download_file(album_info.cover_url, f'{album_path}cover.{album_info.cover_type.name}', artwork_settings=self._get_artwork_settings())
-            print()  # Add empty line after downloading album cover
 
         if album_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
             self.print('Downloading animated album cover')
@@ -549,7 +547,13 @@ class Downloader:
         self.print(f'Platform: {self.module_settings[self.service_name].service_name}')
 
         to_print = 'Codec: ' + codec_data[codec].pretty_name
-        if track_info.bitrate: to_print += f', bitrate: {track_info.bitrate!s}kbps'
+        if track_info.bitrate: 
+            to_print += f', bitrate: {track_info.bitrate!s}kbps'
+        elif self.service_name.lower() == 'spotify' and codec.name.lower() == 'vorbis':
+            # Fallback for Spotify Vorbis when bitrate isn't provided
+            high_quality_tiers = ['VERY_HIGH', 'LOSSLESS', 'HIFI', 'HIGH']
+            spotify_bitrate = 320 if quality_tier.name in high_quality_tiers else 160
+            to_print += f', bitrate: {spotify_bitrate}kbps'
         if track_info.bit_depth: to_print += f', bit depth: {track_info.bit_depth!s}bit'
         if track_info.sample_rate: to_print += f', sample rate: {track_info.sample_rate!s}kHz'
         self.print(to_print)
@@ -815,24 +819,39 @@ class Downloader:
                 compression=CoverCompressionEnum[self.global_settings['covers']['external_compression'].lower()])
             
             if covers_module_name:
-                results = self.search_by_tags(covers_module_name, track_info)
-                if results:
-                    r = results[0]
-                    with self.oprinter.get_lock():
-                        default_temp = self.create_temp_filename()
-                        download_file(r.image_url, default_temp, artwork_settings=self._get_artwork_settings(covers_module_name))
-                        shutil.move(default_temp, cover_temp_location)
-                        self.print(f'Found cover art "{r.name}" from {covers_module_name}')
-                        if self.global_settings['covers']['save_external'] and number_of_tracks <= 1:
-                            ext_cover_info: CoverInfo = self.service.get_track_cover(r.result_id, ext_cover_options, **r.extra_kwargs)
-                            if ext_cover_info:
-                                download_file(ext_cover_info.url, f'{track_location_name}.{ext_cover_info.file_type.name}', artwork_settings=self._get_artwork_settings(covers_module_name, is_external=True))
+                default_temp = download_to_temp(track_info.cover_url)
+                test_cover_options = CoverOptions(file_type=ImageFileTypeEnum.jpg, resolution=get_image_resolution(default_temp), compression=CoverCompressionEnum.high)
+                cover_module = self.loaded_modules[covers_module_name]
+                rms_threshold = self.global_settings['advanced']['cover_variance_threshold']
+
+                results: list[SearchResult] = self.search_by_tags(covers_module_name, track_info)
+                self.print('Covers to test: ' + str(len(results)))
+                attempted_urls = []
+                for i, r in enumerate(results, start=1):
+                    test_cover_info: CoverInfo = cover_module.get_track_cover(r.result_id, test_cover_options, **r.extra_kwargs)
+                    if test_cover_info.url not in attempted_urls:
+                        attempted_urls.append(test_cover_info.url)
+                        test_temp = download_to_temp(test_cover_info.url)
+                        rms = compare_images(default_temp, test_temp)
+                        silentremove(test_temp)
+                        self.print(f'Attempt {i} RMS: {rms!s}')
+                        if rms < rms_threshold:
+                            self.print('Match found below threshold ' + str(rms_threshold))
+                            jpg_cover_info: CoverInfo = cover_module.get_track_cover(r.result_id, jpg_cover_options, **r.extra_kwargs)
+                            if jpg_cover_info:
+                                download_file(jpg_cover_info.url, cover_temp_location, artwork_settings=self._get_artwork_settings(covers_module_name))
+                                silentremove(default_temp)
+                                if self.global_settings['covers']['save_external']:
+                                    ext_cover_info: CoverInfo = cover_module.get_track_cover(r.result_id, ext_cover_options, **r.extra_kwargs)
+                                    if ext_cover_info:
+                                        download_file(ext_cover_info.url, f'{track_location_name}.{ext_cover_info.file_type.name}', artwork_settings=self._get_artwork_settings(covers_module_name, is_external=True))
+                            break
                 else:
                     self.print('Third-party module could not find cover, using fallback')
                     shutil.move(default_temp, cover_temp_location)
             else:
                 download_file(track_info.cover_url, cover_temp_location, artwork_settings=self._get_artwork_settings())
-                if self.global_settings['covers']['save_external'] and ModuleModes.covers in self.module_settings[self.service_name].module_supported_modes and number_of_tracks <= 1:
+                if self.global_settings['covers']['save_external'] and ModuleModes.covers in self.module_settings[self.service_name].module_supported_modes:
                     ext_cover_info: CoverInfo = self.service.get_track_cover(track_id, ext_cover_options, **track_info.cover_extra_kwargs)
                     if ext_cover_info:
                         download_file(ext_cover_info.url, f'{track_location_name}.{ext_cover_info.file_type.name}', artwork_settings=self._get_artwork_settings(is_external=True))
@@ -909,7 +928,7 @@ class Downloader:
             if codec == new_codec:
                 pass
             else:
-                self.print(f'Converting to {new_codec_data.pretty_name}')
+                self.print(f'Converting to {new_codec_data.pretty_name}...')
                 
                 if old_codec_data.spatial or new_codec_data.spatial:
                     self.print('Warning: converting spacial formats is not allowed, skipping')
