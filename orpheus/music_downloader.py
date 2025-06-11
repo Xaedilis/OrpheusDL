@@ -122,7 +122,7 @@ class Downloader:
         if playlist_info.duration: self.print(f'Duration: {beauty_format_seconds(playlist_info.duration)}')
         number_of_tracks = len(playlist_info.tracks)
         self.print(f'Number of tracks: {number_of_tracks!s}')
-        self.print(f'Service: {self.module_settings[self.service_name].service_name}')
+        self.print(f'Platform: {self.module_settings[self.service_name].service_name}')
         
         # Sanitize and shorten playlist name for filesystem
         safe_playlist_name = sanitise_name(playlist_info.name)
@@ -301,6 +301,7 @@ class Downloader:
         if album_info.cover_url:
             self.print('Downloading album cover')
             download_file(album_info.cover_url, f'{album_path}cover.{album_info.cover_type.name}', artwork_settings=self._get_artwork_settings())
+            print()  # Add empty line after downloading album cover
 
         if album_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
             self.print('Downloading animated album cover')
@@ -360,7 +361,7 @@ class Downloader:
             if album_info.release_year: self.print(f'Year: {album_info.release_year}')
             if album_info.duration: self.print(f'Duration: {beauty_format_seconds(album_info.duration)}')
             self.print(f'Number of tracks: {number_of_tracks!s}')
-            self.print(f'Service: {self.module_settings[self.service_name].service_name}')
+            self.print(f'Platform: {self.module_settings[self.service_name].service_name}')
 
             if album_info.booklet_url and not os.path.exists(album_path + 'Booklet.pdf'):
                 self.print('Downloading booklet')
@@ -442,7 +443,7 @@ class Downloader:
         self.print(f'=== Downloading artist {artist_name} ({artist_id}) ===', drop_level=1)
         if number_of_albums: self.print(f'Number of albums: {number_of_albums!s}')
         if number_of_tracks: self.print(f'Number of tracks: {number_of_tracks!s}')
-        self.print(f'Service: {self.module_settings[self.service_name].service_name}')
+        self.print(f'Platform: {self.module_settings[self.service_name].service_name}')
         artist_path = os.path.join(self.path, sanitise_name(artist_name)) + '/'
 
         self.set_indent_number(2)
@@ -545,7 +546,7 @@ class Downloader:
         if self.download_mode is not DownloadTypeEnum.artist: self.print(f'Artists: {", ".join(track_info.artists)} ({track_info.artist_id})')
         if track_info.release_year: self.print(f'Release year: {track_info.release_year!s}')
         if track_info.duration: self.print(f'Duration: {beauty_format_seconds(track_info.duration)}')
-        if self.download_mode is DownloadTypeEnum.track: self.print(f'Service: {self.module_settings[self.service_name].service_name}')
+        self.print(f'Platform: {self.module_settings[self.service_name].service_name}')
 
         to_print = 'Codec: ' + codec_data[codec].pretty_name
         if track_info.bitrate: to_print += f', bitrate: {track_info.bitrate!s}kbps'
@@ -627,8 +628,7 @@ class Downloader:
             with open(track_location_name + '.txt', 'w', encoding='utf-8') as f: f.write(track_info.description)
 
         # Begin process
-        print()
-        self.print("Downloading track file")
+        self.print("Downloading audio...")
         max_retries = 3  # Number of retries for non-rate-limit errors
         retry_delay = 2  # Delay between retries in seconds
         
@@ -806,7 +806,7 @@ class Downloader:
             covers_module_name = self.third_party_modules[ModuleModes.covers]
             covers_module_name = covers_module_name if covers_module_name != self.service_name else None
             if covers_module_name: print()
-            self.print('Downloading artwork' + ((' with ' + covers_module_name) if covers_module_name else ''))
+            self.print('Downloading artwork...' + ((' with ' + covers_module_name) if covers_module_name else ''))
             
             jpg_cover_options = CoverOptions(file_type=ImageFileTypeEnum.jpg, resolution=self.global_settings['covers']['main_resolution'], \
                 compression=CoverCompressionEnum[self.global_settings['covers']['main_compression'].lower()])
@@ -994,7 +994,7 @@ class Downloader:
                     track_location = new_track_location
 
         # Tagging starts here
-        self.print('Tagging file')
+        self.print('Tagging file...')
         try:
             tag_file(track_location, cover_temp_location if self.global_settings['covers']['embed_cover'] else None,
                      track_info, credits_list, embedded_lyrics, container)
