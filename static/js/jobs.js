@@ -5,24 +5,21 @@ let currentJobId = null;
 let autoRefreshEnabled = true;
 let autoRefreshInterval = null;
 
+// Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize auto-refresh checkbox
-    const autoRefreshCheckbox = document.getElementById('autoRefresh');
-    if (autoRefreshCheckbox) {
-        autoRefreshCheckbox.addEventListener('change', function() {
-            autoRefreshEnabled = this.checked;
-            if (autoRefreshEnabled) {
-                startAutoRefresh();
-            } else {
-                stopAutoRefresh();
-            }
-        });
-    }
-
-    // Load jobs on page load
-    refreshJobs();
-    startAutoRefresh();
+    console.log('DOM loaded, starting jobs auto-refresh');
+    startJobsAutoRefresh();
 });
+
+// Stop auto-refresh when page is hidden/closed
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        stopJobsAutoRefresh();
+    } else {
+        startJobsAutoRefresh();
+    }
+});
+
 
 function startAutoRefresh() {
     if (autoRefreshInterval) {
@@ -40,39 +37,65 @@ function stopAutoRefresh() {
     }
 }
 
+// Global variable to store the refresh interval
+let jobsRefreshInterval = null;
+
+// Function to fetch and display jobs
 async function refreshJobs() {
     try {
+        console.log('Fetching jobs...');
         const response = await fetch('/api/jobs');
+
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-        const data = await response.json();
 
-        // Update your UI with the jobs data
-        updateJobsDisplay(data.jobs);
+        const data = await response.json();
+        console.log('Jobs data received:', data);
+
+        renderJobsList(data.jobs || []);
 
     } catch (error) {
         console.error('Failed to fetch jobs:', error);
-        throw error; // Re-throw so clearCompletedJobs can catch it
+        document.getElementById('jobsResults').innerHTML =
+            `<h3>Download Jobs</h3><p style="color: red;">Error loading jobs: ${error.message}</p>`;
     }
 }
 
 
+
+// Function to render the jobs list
 function renderJobsList(jobs) {
     const jobsDiv = document.getElementById('jobsResults');
-    
+
+    if (!jobsDiv) {
+        console.error('jobsResults element not found');
+        return;
+    }
+
     // Group jobs by status
     const groupedJobs = {
-        running: jobs.filter(job => job.status === 'running' || job.status === 'pending'),
+        running: jobs.filter(job => job.status === 'running' || job.status === 'queued'),
         completed: jobs.filter(job => job.status === 'completed'),
-        failed: jobs.filter(job => job.status === 'failed' || job.status === 'cancelled')
+        failed: jobs.filter(job => job.status === 'failed')
     };
 
     let html = `<h3>Download Jobs (${jobs.length})</h3>`;
 
+    // Add clear completed jobs button if there are completed or failed jobs
+    if (groupedJobs.completed.length > 0 || groupedJobs.failed.length > 0) {
+        html += `
+            <div style="margin-bottom: 15px;">
+                <button onclick="clearCompletedJobs()" class="btn btn-warning btn-sm">
+                    Clear Completed Jobs
+                </button>
+            </div>
+        `;
+    }
+
     // Render running jobs first
     if (groupedJobs.running.length > 0) {
-        html += '<h4>Active Jobs</h4>';
+        html += '<h4>🔄 Active Jobs</h4>';
         groupedJobs.running.forEach(job => {
             html += renderJobItem(job);
         });
@@ -80,7 +103,7 @@ function renderJobsList(jobs) {
 
     // Then completed jobs
     if (groupedJobs.completed.length > 0) {
-        html += '<h4>Completed Jobs</h4>';
+        html += '<h4>✅ Completed Jobs</h4>';
         groupedJobs.completed.forEach(job => {
             html += renderJobItem(job);
         });
@@ -88,88 +111,105 @@ function renderJobsList(jobs) {
 
     // Finally failed jobs
     if (groupedJobs.failed.length > 0) {
-        html += '<h4>Failed Jobs</h4>';
+        html += '<h4>❌ Failed Jobs</h4>';
         groupedJobs.failed.forEach(job => {
             html += renderJobItem(job);
         });
     }
 
+    // Show message if no jobs
+    if (jobs.length === 0) {
+        html += '<p>No download jobs found.</p>';
+    }
+
     jobsDiv.innerHTML = html;
 }
 
+
+// Function to render individual job item
 function renderJobItem(job) {
-    const statusClasses = {
-        'pending': 'job-pending',
-        'running': 'job-running', 
-        'completed': 'job-completed',
-        'failed': 'job-failed',
-        'cancelled': 'job-cancelled'
-    };
-
-    const statusClass = statusClasses[job.status] || 'job-unknown';
-    const jobIdShort = job.job_id.substring(0, 8);
-    const urlDisplay = job.url.length > 50 ? job.url.substring(0, 50) + '...' : job.url;
-    const createdAt = new Date(job.created_at).toLocaleString();
-
-    // Determine which buttons to show
-    const isRunning = job.status === 'running' || job.status === 'pending';
-    const isFailed = job.status === 'failed' || job.status === 'cancelled';
-    const isCompleted = job.status === 'completed';
-
-    let progressHtml = '';
-    if (job.progress !== undefined && isRunning) {
-        progressHtml = `
-            <div class="job-progress">
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: ${job.progress || 0}%"></div>
-                </div>
-                <span class="progress-text">${job.progress || 0}%</span>
-            </div>
-        `;
-    }
-
-    let errorHtml = '';
-    if (job.error_message) {
-        errorHtml = `
-            <div class="job-error">
-                <p style="color: red;"><strong>Error:</strong> ${job.error_message}</p>
-            </div>
-        `;
-    }
+    const statusBadge = getStatusBadge(job.status);
+    const timeInfo = getTimeInfo(job);
 
     return `
-        <div class="job-item ${statusClass}" data-job-id="${job.job_id}">
-            <div class="job-header">
-                <h4>Job ${jobIdShort}...</h4>
-                <span class="job-status-badge status-${job.status}">${job.status.toUpperCase()}</span>
+        <div class="job-item" style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong>${job.job_type.replace('_', ' ').toUpperCase()}</strong>
+                    ${statusBadge}
+                </div>
+                <div style="text-align: right;">
+                    <small style="color: #666;">${timeInfo}</small>
+                </div>
             </div>
-            <div class="job-details">
-                <p><strong>Type:</strong> ${job.job_type}</p>
-                <p><strong>Platform:</strong> ${job.platform || 'Unknown'}</p>
-                <p><strong>URL:</strong> <span title="${job.url}">${urlDisplay}</span></p>
-                <p><strong>Created:</strong> ${createdAt}</p>
-                ${progressHtml}
-                ${errorHtml}
+            
+            <div style="margin-top: 5px;">
+                <small><strong>URL:</strong> ${job.url}</small><br>
+                <small><strong>Platform:</strong> ${job.platform}</small>
             </div>
-            <div class="job-actions">
-                <button onclick="viewJobLogs('${job.job_id}')" class="logs-btn">View Logs</button>
-                ${isRunning ? `<button onclick="cancelJob('${job.job_id}')" class="cancel-btn">Cancel</button>` : ''}
-                ${isFailed ? `<button onclick="retryJob('${job.job_id}')" class="retry-btn">Retry</button>` : ''}
-                ${isCompleted || isFailed ? `<button onclick="removeJob('${job.job_id}')" class="remove-btn">Remove</button>` : ''}
+            
+            ${job.error_message ? `
+                <div style="margin-top: 5px; color: red;">
+                    <small><strong>Error:</strong> ${job.error_message}</small>
+                </div>
+            ` : ''}
+            
+            ${job.file_paths && job.file_paths.length > 0 ? `
+                <div style="margin-top: 5px;">
+                    <small><strong>Files:</strong></small>
+                    <ul style="margin: 0; padding-left: 20px;">
+                        ${job.file_paths.map(path => `<li><small>${path}</small></li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+            
+            <div style="margin-top: 10px;">
+                <button onclick="viewJobLogs('${job.job_id}')" class="btn btn-info btn-sm">
+                    View Logs (${job.logs_count || 0})
+                </button>
             </div>
         </div>
     `;
 }
 
+// Function to get status badge
+function getStatusBadge(status) {
+    const badges = {
+        'queued': '<span style="background: #ffc107; color: black; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">QUEUED</span>',
+        'running': '<span style="background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">RUNNING</span>',
+        'completed': '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">COMPLETED</span>',
+        'failed': '<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">FAILED</span>'
+    };
+    return badges[status] || `<span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">${status.toUpperCase()}</span>`;
+}
+
+// Function to get time information
+function getTimeInfo(job) {
+    const created = new Date(job.created_at);
+    const now = new Date();
+    const elapsed = Math.floor((now - created) / 1000 / 60); // minutes
+
+    if (job.completed_at) {
+        const completed = new Date(job.completed_at);
+        const duration = Math.floor((completed - created) / 1000 / 60);
+        return `Completed in ${duration}m`;
+    } else if (job.started_at) {
+        return `Running for ${elapsed}m`;
+    } else {
+        return `Queued ${elapsed}m ago`;
+    }
+}
+
+
 async function viewJobLogs(jobId) {
     currentJobId = jobId;
-    
+
     try {
         const response = await fetch(`/api/jobs/${jobId}/logs`);
         const data = await response.json();
 
         document.getElementById('logsJobId').textContent = jobId.substring(0, 8) + '...';
-        
+
         // Get job status
         const jobResponse = await fetch(`/api/jobs/${jobId}`);
         const jobData = await jobResponse.json();
@@ -186,7 +226,7 @@ async function viewJobLogs(jobId) {
 
 function displayJobLogs(logs) {
     const logsContent = document.getElementById('jobLogsContent');
-    
+
     if (!logs || logs.length === 0) {
         logsContent.innerHTML = '<p>No logs available.</p>';
         return;
@@ -252,7 +292,7 @@ async function cancelJob(jobId) {
             const response = await fetch(`/api/jobs/${jobId}/cancel`, {
                 method: 'POST'
             });
-            
+
             if (response.ok) {
                 refreshJobs();
             } else {
@@ -270,7 +310,7 @@ async function retryJob(jobId) {
         const response = await fetch(`/api/jobs/${jobId}/retry`, {
             method: 'POST'
         });
-        
+
         if (response.ok) {
             refreshJobs();
         } else {
@@ -288,7 +328,7 @@ async function removeJob(jobId) {
             const response = await fetch(`/api/jobs/${jobId}`, {
                 method: 'DELETE'
             });
-            
+
             if (response.ok) {
                 refreshJobs();
             } else {
@@ -301,24 +341,18 @@ async function removeJob(jobId) {
     }
 }
 
+// Function to clear completed jobs
 async function clearCompletedJobs() {
     if (confirm('Are you sure you want to clear all completed jobs?')) {
         try {
             const response = await fetch('/api/jobs/clear-completed', {
                 method: 'POST'
             });
-            
+
             if (response.ok) {
-                console.log('Jobs cleared successfully, refreshing...');
-                try {
-                    await refreshJobs();
-                    console.log('Jobs refreshed successfully');
-                } catch (refreshError) {
-                    console.error('Error refreshing jobs:', refreshError);
-                    alert('Jobs were cleared but failed to refresh the list: ' + refreshError.message);
-                    // Optionally reload the page as fallback
-                    // window.location.reload();
-                }
+                const result = await response.json();
+                console.log('Jobs cleared:', result);
+                await refreshJobs(); // Refresh the job list
             } else {
                 throw new Error('Failed to clear completed jobs');
             }
@@ -326,6 +360,29 @@ async function clearCompletedJobs() {
             console.error('Error clearing completed jobs:', error);
             alert('Error clearing completed jobs: ' + error.message);
         }
+    }
+}
+
+// Function to start auto-refresh
+function startJobsAutoRefresh() {
+    // Clear existing interval if any
+    if (jobsRefreshInterval) {
+        clearInterval(jobsRefreshInterval);
+    }
+
+    // Initial load
+    refreshJobs();
+
+    // Set up auto-refresh every 5 seconds
+    jobsRefreshInterval = setInterval(refreshJobs, 5000);
+    console.log('Jobs auto-refresh started');
+}
+// Function to stop auto-refresh
+function stopJobsAutoRefresh() {
+    if (jobsRefreshInterval) {
+        clearInterval(jobsRefreshInterval);
+        jobsRefreshInterval = null;
+        console.log('Jobs auto-refresh stopped');
     }
 }
 
