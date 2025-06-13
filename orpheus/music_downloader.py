@@ -26,6 +26,12 @@ except ModuleNotFoundError:
     class SpotifyRateLimitDetectedError(Exception):
         pass
 
+try:
+    from modules.tidal.tidal_api import TidalError
+except ModuleNotFoundError:
+    class TidalError(Exception):
+        pass
+
 
 def beauty_format_seconds(seconds: int) -> str:
     time_data = gmtime(seconds)
@@ -195,7 +201,10 @@ class Downloader:
                 track_id_new = results[0].result_id if len(results) else None
                 
                 if track_id_new:
-                    self.download_track(track_id_new, album_location=playlist_path, track_index=index, number_of_tracks=number_of_tracks, indent_level=2, m3u_playlist=m3u_playlist_path, extra_kwargs=results[0].extra_kwargs)
+                    try:
+                        self.download_track(track_id_new, album_location=playlist_path, track_index=index, number_of_tracks=number_of_tracks, indent_level=2, m3u_playlist=m3u_playlist_path, extra_kwargs=results[0].extra_kwargs)
+                    except TidalError as e:
+                        self.print(f"Skipping track due to an error: {e}", drop_level=1)
                 else:
                     tracks_errored.add(f'{track_info.name} - {track_info.artists[0]}')
                     if ModuleModes.download in self.module_settings[original_service].module_supported_modes:
@@ -335,8 +344,12 @@ class Downloader:
                 qobuz_kwargs.update(extra_kwargs)
             album_info: AlbumInfo = self.service.get_album_info(album_id, **qobuz_kwargs)
         else:
-            # For other non-Spotify, non-SoundCloud, non-Qobuz services
-            album_info: AlbumInfo = self.service.get_album_info(album_id, data=extra_kwargs)
+            try:
+                # For other non-Spotify, non-SoundCloud, non-Qobuz services
+                album_info: AlbumInfo = self.service.get_album_info(album_id, data=extra_kwargs)
+            except TidalError as e:
+                self.print(f'{self.module_settings[self.service_name].service_name.upper()}: {e} Trying workaround ...')
+                album_info: AlbumInfo = e.data
 
         if not album_info:
             logging.warning(f"Could not retrieve album info for {album_id} from {self.service_name}. Skipping album.")
@@ -493,11 +506,17 @@ class Downloader:
             proprietary_codecs = self.global_settings['codecs']['proprietary_codecs'],
         )
         
-        # Conditional call to get_track_info based on service
-        if self.service_name.lower() == 'tidal':
-            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, data=extra_kwargs)
-        else:
-            track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **extra_kwargs)
+        try:
+            # Conditional call to get_track_info based on service
+            if self.service_name.lower() == 'tidal':
+                track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, data=extra_kwargs)
+            else:
+                track_info: TrackInfo = self.service.get_track_info(track_id, quality_tier, codec_options, **extra_kwargs)
+        except TidalError as e:
+            self.print(f"\nError: Could not retrieve information for track {track_id}", drop_level=1)
+            self.print(f"Underlying cause: {e}", drop_level=1)
+            self.print(f'=== ❌ Track failed ===\n', drop_level=1)
+            return
         
         if track_info is None:
             # Determine the simple string ID from the input argument
@@ -560,8 +579,8 @@ class Downloader:
 
         # Check if track_info returns error, display it and return this function to not download the track
         if track_info.error:
-            self.print(track_info.error)
-            self.print(f'=== Track {track_id} failed ===', drop_level=1)
+            self.print(f'{track_info.error}')
+            self.print(f'=== ❌ Track failed ===', drop_level=1)
             return
 
         album_location = album_location.replace('\\', '/')
@@ -641,8 +660,8 @@ class Downloader:
             try:
                 id_to_pass_to_module = actual_id_str
                 if self.service_name.lower() == 'spotify':
-                    if hasattr(track_info, 'gid_hex') and track_info.gid_hex:
-                        id_to_pass_to_module = track_info.gid_hex
+                    if 'gid_hex' in track_info.download_extra_kwargs and track_info.download_extra_kwargs['gid_hex']:
+                        id_to_pass_to_module = track_info.download_extra_kwargs['gid_hex']
                     else:
                         # This case should ideally not be hit if get_track_info populates gid_hex correctly
                         self.oprinter.oprint(f"Warning: Spotify track_info for {actual_id_str} is missing gid_hex. Attempting to use original ID. Download may fail.", drop_level=1)
@@ -770,13 +789,9 @@ class Downloader:
                         logging.warning(f"Track download attempt {attempt + 1} failed for {actual_id_str}. Retrying in {retry_delay} seconds...")
                         self.print(f"Download attempt {attempt + 1} failed. Retrying in {retry_delay} seconds...")
                         time.sleep(retry_delay)
-            except SpotifyRateLimitDetectedError:
-                self.print("Track deferred due to detected rate limit.")
-                logging.warning(f"Track {actual_id_str} deferred due to Spotify rate limit.")
-                return "RATE_LIMITED"
-            except TrackUnavailableError as e:
+            except (TrackUnavailableError, TidalError) as e:
                 self.print(f"{e}", drop_level=1)
-                self.print(f'=== Track {actual_id_str} failed (Unavailable) ===', drop_level=1)
+                self.print(f'=== Track {actual_id_str} failed ===', drop_level=1)
                 return # Exit the function to prevent further processing
             except Exception as e:
                 if attempt < max_retries - 1:
