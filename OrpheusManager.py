@@ -1,4 +1,3 @@
-
 from orpheus.core import Orpheus
 import traceback
 import subprocess
@@ -344,13 +343,14 @@ class OrpheusManager:
             # Run orpheus.py with the track URL
             cmd = ["python", orpheus_script_path, track_url]
 
-            # Start the process
+            # Start the process with proper encoding handling
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.getcwd()
+                text=False,  # Handle as bytes to avoid encoding issues
+                cwd=os.getcwd(),
+                env=os.environ.copy()  # Preserve environment variables
             )
 
             # Get the process ID for tracking
@@ -384,13 +384,14 @@ class OrpheusManager:
             # Run orpheus.py with the album URL
             cmd = ["python", orpheus_script_path, album_url]
 
-            # Start the process
+            # Start the process with proper encoding handling
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.getcwd()
+                text=False,  # Handle as bytes to avoid encoding issues
+                cwd=os.getcwd(),
+                env=os.environ.copy()  # Preserve environment variables
             )
 
             # Get the process ID for tracking
@@ -413,3 +414,27 @@ class OrpheusManager:
     def get_available_platforms(self):
         """Get list of available platforms"""
         return list(self.orpheus.module_list)
+
+    def safe_decode_output(self, output_bytes):
+        """Safely decode subprocess output with fallback handling"""
+        if not output_bytes:
+            return ""
+
+        # Try UTF-8 first
+        try:
+            return output_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            pass
+
+        # Try UTF-8 with error replacement
+        try:
+            return output_bytes.decode('utf-8', errors='replace')
+        except UnicodeDecodeError:
+            pass
+
+        # Try system default encoding with error replacement
+        try:
+            return output_bytes.decode(errors='replace')
+        except UnicodeDecodeError:
+            # Last resort: latin1 can decode any byte sequence
+            return output_bytes.decode('latin1', errors='replace')
