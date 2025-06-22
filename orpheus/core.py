@@ -38,8 +38,8 @@ class Orpheus:
                 "download_path": "./downloads/",
                 "download_quality": "hifi",
                 "search_limit": 10,
-                "concurrent_downloads": 3,
-                "progress_bar": True
+                "concurrent_downloads": 5,
+                "progress_bar": False
             },
             "artist_downloading":{
                 "return_credited_albums": True,
