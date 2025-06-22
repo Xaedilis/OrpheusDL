@@ -6,12 +6,38 @@ import argparse
 import re
 from urllib.parse import urlparse
 
+# Initialize Sentry for error monitoring (only in production)
+try:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn="https://0219493f093f41e8338bced7ea8a5135@o4509519200321536.ingest.de.sentry.io/4509519204057168",
+        # Set sample rate to reduce noise in development
+        traces_sample_rate=0.1,
+        # Capture user context but be mindful of privacy
+        send_default_pii=False,
+        # Set environment to help differentiate between dev/prod
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        # Capture more context for debugging
+        attach_stacktrace=True,
+        # Release tracking
+        release=os.getenv("ORPHEUS_VERSION", "unknown"),
+    )
+    # Set tags after initialization
+    sentry_sdk.set_tag("component", "cli")
+except ImportError:
+    # Sentry not installed, continue without it
+    pass
+
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
 try:
-    from modules.spotify.spotify_api import SpotifyAuthError
+    from modules.spotify.spotify_api import SpotifyAuthError, SpotifyRateLimitDetectedError
 except ModuleNotFoundError:
     SpotifyAuthError = None  # type: ignore
+    SpotifyRateLimitDetectedError = None  # type: ignore
+
+
+
 
 
 def main():
