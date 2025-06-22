@@ -37,7 +37,9 @@ class Orpheus:
             "general": {
                 "download_path": "./downloads/",
                 "download_quality": "hifi",
-                "search_limit": 10
+                "search_limit": 10,
+                "concurrent_downloads": 3,
+                "progress_bar": True
             },
             "artist_downloading":{
                 "return_credited_albums": True,
@@ -83,8 +85,9 @@ class Orpheus:
             "advanced": {
                 "advanced_login_system": False,
                 "codec_conversions": {
-                    "alac": "flac",
-                    "wav": "flac"
+                    "ALAC": "FLAC",
+                    "WAV": "FLAC",
+                    "VORBIS": "VORBIS"
                 },
                 "conversion_flags": {
                     "flac": {
@@ -116,9 +119,21 @@ class Orpheus:
         self.settings = json.loads(open(self.settings_location, 'r').read()) if os.path.exists(self.settings_location) else {}
 
         try:
-            if self.settings['global']['advanced']['debug_mode']: logging.basicConfig(level=logging.DEBUG)
+            if self.settings['global']['advanced']['debug_mode']: 
+                logging.basicConfig(level=logging.DEBUG)
+            else:
+                # Configure logging to suppress Spotify module warnings/errors
+                logging.basicConfig(level=logging.CRITICAL)
+                # Specifically suppress common Spotify authentication messages
+                logging.getLogger('modules.spotify.spotify_api').setLevel(logging.CRITICAL)
+                logging.getLogger('librespot').setLevel(logging.CRITICAL)
+                logging.getLogger('spotify').setLevel(logging.CRITICAL)
         except KeyError:
-            pass
+            # Configure logging to suppress Spotify module warnings/errors even if no settings
+            logging.basicConfig(level=logging.CRITICAL)
+            logging.getLogger('modules.spotify.spotify_api').setLevel(logging.CRITICAL)
+            logging.getLogger('librespot').setLevel(logging.CRITICAL)
+            logging.getLogger('spotify').setLevel(logging.CRITICAL)
 
         os.makedirs('extensions', exist_ok=True)
         for extension in os.listdir('extensions'):  # Loading extensions
@@ -218,7 +233,8 @@ class Orpheus:
                             compression = CoverCompressionEnum[self.settings['global']['covers']['main_compression']]
                         )
                     ),
-                    gui_handlers = self.gui_handlers
+                    gui_handlers = self.gui_handlers,
+                    progress_bar_enabled = self.settings['global']['general'].get('progress_bar', True)
                 )
 
                 loaded_module = class_(module_controller)
@@ -371,12 +387,13 @@ class Orpheus:
 
 def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path):
     downloader = Downloader(orpheus_session.settings['global'], orpheus_session.module_controls, oprinter, output_path)
+    downloader.full_settings = orpheus_session.settings  # Add access to full settings including modules
     os.makedirs('temp', exist_ok=True)
 
     for mainmodule, items in media_to_download.items():
         total_items_in_batch = len(items)
         
-        for media in items:
+        for index, media in enumerate(items, start=1):
             if ModuleModes.download not in orpheus_session.module_settings[mainmodule].module_supported_modes:
                 raise Exception(f'{mainmodule} does not support track downloading') # TODO: replace with ModuleDoesNotSupportAbility
 
@@ -412,16 +429,82 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                 if mediatype is DownloadTypeEnum.album:
                     downloader.download_album(media_id, extra_kwargs=media.extra_kwargs)
                 elif mediatype is DownloadTypeEnum.track:
-                    downloader.download_track(
+                    downloader.set_indent_number(1)  # Set proper indentation for track downloads
+                    
+                    # For single track downloads, show Pass 1 only if there are multiple tracks
+                    pass_indicator = f" (Pass 1)" if total_items_in_batch > 1 else ""
+                    if total_items_in_batch > 1:
+                        # Track headers should have 8 spaces indentation (don't drop the indent level)
+                        downloader.print(f'Track {index}/{total_items_in_batch}{pass_indicator}')
+                    
+                    download_result = downloader.download_track(
                         media_id, 
                         number_of_tracks=total_items_in_batch,
-                        extra_kwargs=media.extra_kwargs
+                        extra_kwargs=media.extra_kwargs,
+                        indent_level=1
                     )
+                    
+                    # Add rate limiting for individual track downloads (like from urls.txt)
+                    # Only pause if track was actually downloaded (not skipped) and not the last track
+                    if (mainmodule.lower() == 'spotify' and index < total_items_in_batch and 
+                        download_result is not None and download_result != "RATE_LIMITED"):
+                        pause_seconds = downloader._get_spotify_pause_seconds()
+                        # Don't add extra blank line - track completion already handles spacing
+                        downloader.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
+                        import time
+                        time.sleep(pause_seconds)
+                    
+                    # Collect rate-limited tracks for retry (only for Spotify and multiple tracks)
+                    if (download_result == "RATE_LIMITED" and mainmodule.lower() == 'spotify' and 
+                        total_items_in_batch > 1):
+                        # Store rate-limited track info for later retry
+                        if not hasattr(downloader, 'rate_limited_tracks'):
+                            downloader.rate_limited_tracks = []
+                        downloader.rate_limited_tracks.append({
+                            'media': media,
+                            'original_index': index
+                        })
                 elif mediatype is DownloadTypeEnum.playlist:
                     downloader.download_playlist(media_id, extra_kwargs=media.extra_kwargs)
                 elif mediatype is DownloadTypeEnum.artist:
                     downloader.download_artist(media_id, extra_kwargs=media.extra_kwargs)
                 else:
                     raise Exception(f'\tUnknown media type "{mediatype}"')
+
+        # Handle retry for rate-limited individual tracks (only for Spotify and multiple tracks)
+        if mainmodule.lower() == 'spotify' and total_items_in_batch > 1:
+            # Add blank line after all tracks are processed
+            print()
+            
+            if hasattr(downloader, 'rate_limited_tracks') and downloader.rate_limited_tracks:
+                num_deferred = len(downloader.rate_limited_tracks)
+                downloader.print(f'{num_deferred} tracks deferred due to rate limiting. Retrying...', drop_level=0)
+                
+                for i, retry_info in enumerate(downloader.rate_limited_tracks):
+                    media = retry_info['media']
+                    original_index = retry_info['original_index']
+                    
+                    downloader.print(f'Track {original_index}/{total_items_in_batch} (Retry Pass)', drop_level=1)
+                    
+                    download_result = downloader.download_track(
+                        media.media_id,
+                        number_of_tracks=total_items_in_batch,
+                        extra_kwargs=media.extra_kwargs,
+                        indent_level=1
+                    )
+                    
+                    # Add 30-second pause between retry tracks (except for the last one)
+                    if i < len(downloader.rate_limited_tracks) - 1:
+                        print()  # Add blank line before pause message
+                        downloader.print('Pausing 30 seconds to prevent rate limiting...', drop_level=1)
+                        import time
+                        time.sleep(30)
+                
+                # Clear the rate-limited tracks list after retry
+                downloader.rate_limited_tracks = []
+            else:
+                # Show "no tracks deferred" message only for multiple track downloads
+                downloader.print('No tracks were deferred due to rate limiting.', drop_level=0)
+                print()  # Add blank line after message
 
     if os.path.exists('temp'): shutil.rmtree('temp')

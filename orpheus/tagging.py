@@ -1,5 +1,7 @@
 import base64
 import logging
+import os
+import tempfile
 from dataclasses import asdict
 
 from PIL import Image
@@ -19,6 +21,48 @@ from utils.models import ContainerEnum, TrackInfo
 
 # Needed for Windows tagging support
 MP4Tags._padding = 0
+
+
+def _resize_image_if_needed(image_path: str, max_size_bytes: int = 16 * 1024 * 1024, target_resolution: tuple = (3000, 3000)) -> str:
+    """
+    Resize an image if it exceeds the maximum file size.
+    
+    Args:
+        image_path: Path to the original image
+        max_size_bytes: Maximum allowed file size in bytes (default: 16MB)
+        target_resolution: Target resolution as (width, height) tuple (default: 3000x3000)
+    
+    Returns:
+        Path to the resized image (temporary file) or original path if no resize needed
+    """
+    # Check if the original file size is within limits
+    if os.path.getsize(image_path) <= max_size_bytes:
+        return image_path
+    
+    try:
+        # Open and resize the image
+        with Image.open(image_path) as img:
+            # Convert to RGB if necessary (handles RGBA, P, etc.)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize maintaining aspect ratio, fitting within target_resolution
+            img.thumbnail(target_resolution, Image.Resampling.LANCZOS)
+            
+            # Create a temporary file for the resized image
+            temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg', prefix='orpheus_resized_')
+            os.close(temp_fd)  # Close the file descriptor, we'll use the path
+            
+            # Save the resized image with high quality
+            img.save(temp_path, 'JPEG', quality=90, optimize=True)
+            
+
+            
+            return temp_path
+            
+    except Exception as e:
+        print(f'\tFailed to resize cover image: {e}. Using original image.')
+        return image_path
 
 
 def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_list: list, embedded_lyrics: str, container: ContainerEnum):
@@ -191,45 +235,88 @@ def tag_file(file_path: str, image_path: str, track_info: TrackInfo, credits_lis
         tagger['REPLAYGAIN_TRACK_GAIN'] = str(track_info.tags.replay_gain)
         tagger['REPLAYGAIN_TRACK_PEAK'] = str(track_info.tags.replay_peak)
 
-    # only embed the cover when embed_cover is set to True
+    # Handle cover art embedding/removal
     if image_path:
-        with open(image_path, 'rb') as c:
-            data = c.read()
-        picture = Picture()
-        picture.data = data
+        # Always clear existing cover art first to prevent duplicates (especially for Beatport/Beatsource)
+        if container == ContainerEnum.flac:
+            tagger.clear_pictures()
+        elif container == ContainerEnum.m4a:
+            if 'covr' in tagger:
+                del tagger['covr']
+        elif container == ContainerEnum.mp3:
+            if hasattr(tagger.tags, '_EasyID3__id3') and 'APIC' in tagger.tags._EasyID3__id3:
+                del tagger.tags._EasyID3__id3['APIC']
+        elif container in {ContainerEnum.ogg, ContainerEnum.opus}:
+            if 'metadata_block_picture' in tagger:
+                del tagger['metadata_block_picture']
+        
+        # Embed new cover art
+        # Resize image if it's too large
+        resized_image_path = _resize_image_if_needed(image_path, max_size_bytes=16 * 1024 * 1024)
+        temp_file_created = resized_image_path != image_path
+        
+        try:
+            with open(resized_image_path, 'rb') as c:
+                data = c.read()
+            picture = Picture()
+            picture.data = data
 
-        # Check if cover is smaller than 16MB
-        if len(picture.data) < picture._MAX_SIZE:
-            if container == ContainerEnum.flac:
-                picture.type = PictureType.COVER_FRONT
-                picture.mime = u'image/jpeg'
-                tagger.add_picture(picture)
-            elif container == ContainerEnum.m4a:
-                tagger['covr'] = [MP4Cover(data, imageformat=MP4Cover.FORMAT_JPEG)]
-            elif container == ContainerEnum.mp3:
-                # Never access protected attributes, too bad!
-                tagger.tags._EasyID3__id3._DictProxy__dict['APIC'] = APIC(
-                    encoding=3,  # UTF-8
-                    mime='image/jpeg',
-                    type=3,  # album art
-                    desc='Cover',  # name
-                    data=data
-                )
-            # If you want to have a cover in only a few applications, then this technically works for Opus
-            elif container in {ContainerEnum.ogg, ContainerEnum.opus}:
-                im = Image.open(image_path)
-                width, height = im.size
-                picture.type = 17
-                picture.desc = u'Cover Art'
-                picture.mime = u'image/jpeg'
-                picture.width = width
-                picture.height = height
-                picture.depth = 24
-                encoded_data = base64.b64encode(picture.write())
-                tagger['metadata_block_picture'] = [encoded_data.decode('ascii')]
-        else:
-            print(f'\tCover file size is too large, only {(picture._MAX_SIZE / 1024 ** 2):.2f}MB are allowed. Track '
-                  f'will not have cover saved.')
+            # Check if cover is smaller than 16MB (should always be true after resizing)
+            if len(picture.data) < picture._MAX_SIZE:
+                if container == ContainerEnum.flac:
+                    picture.type = PictureType.COVER_FRONT
+                    picture.mime = u'image/jpeg'
+                    tagger.add_picture(picture)
+                elif container == ContainerEnum.m4a:
+                    tagger['covr'] = [MP4Cover(data, imageformat=MP4Cover.FORMAT_JPEG)]
+                elif container == ContainerEnum.mp3:
+                    # Never access protected attributes, too bad!
+                    tagger.tags._EasyID3__id3._DictProxy__dict['APIC'] = APIC(
+                        encoding=3,  # UTF-8
+                        mime='image/jpeg',
+                        type=3,  # album art
+                        desc='Cover',  # name
+                        data=data
+                    )
+                # If you want to have a cover in only a few applications, then this technically works for Opus
+                elif container in {ContainerEnum.ogg, ContainerEnum.opus}:
+                    im = Image.open(resized_image_path)
+                    width, height = im.size
+                    picture.type = 17
+                    picture.desc = u'Cover Art'
+                    picture.mime = u'image/jpeg'
+                    picture.width = width
+                    picture.height = height
+                    picture.depth = 24
+                    encoded_data = base64.b64encode(picture.write())
+                    tagger['metadata_block_picture'] = [encoded_data.decode('ascii')]
+            else:
+                print(f'\tCover file size is still too large after resizing, only {(picture._MAX_SIZE / 1024 ** 2):.2f}MB are allowed. Track '
+                      f'will not have cover saved.')
+        finally:
+            # Clean up temporary file if one was created
+            if temp_file_created and os.path.exists(resized_image_path):
+                try:
+                    os.unlink(resized_image_path)
+                except OSError:
+                    pass  # Ignore cleanup errors
+    else:
+        # Remove existing cover art when embed_cover is disabled
+        if container == ContainerEnum.flac:
+            # Remove all pictures from FLAC file
+            tagger.clear_pictures()
+        elif container == ContainerEnum.m4a:
+            # Remove cover art from MP4/M4A file
+            if 'covr' in tagger:
+                del tagger['covr']
+        elif container == ContainerEnum.mp3:
+            # Remove APIC frame from MP3 file
+            if hasattr(tagger.tags, '_EasyID3__id3') and 'APIC' in tagger.tags._EasyID3__id3:
+                del tagger.tags._EasyID3__id3['APIC']
+        elif container in {ContainerEnum.ogg, ContainerEnum.opus}:
+            # Remove cover art from Ogg/Opus file
+            if 'metadata_block_picture' in tagger:
+                del tagger['metadata_block_picture']
 
     try:
         tagger.save(file_path, v1=2, v2_version=3, v23_sep=None) if container == ContainerEnum.mp3 else tagger.save()
