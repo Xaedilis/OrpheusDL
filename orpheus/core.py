@@ -85,9 +85,9 @@ class Orpheus:
             "advanced": {
                 "advanced_login_system": False,
                 "codec_conversions": {
-                    "ALAC": "FLAC",
-                    "WAV": "FLAC",
-                    "VORBIS": "VORBIS"
+                    "alac": "flac",
+                    "wav": "flac",
+                    "vorbis": "vorbis"
                 },
                 "conversion_flags": {
                     "flac": {
