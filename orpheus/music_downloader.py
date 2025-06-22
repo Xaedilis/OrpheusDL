@@ -1843,7 +1843,7 @@ class Downloader:
 
 
         # Download lyrics
-        if self.global_settings['lyrics']['save_synced_lyrics'] and track_info.lyrics:
+        if self.global_settings['lyrics']['save_synced_lyrics'] and hasattr(track_info, 'lyrics') and track_info.lyrics:
             d_print('Downloading lyrics')
             with open(f'{os.path.splitext(track_location)[0]}.lrc', 'w', encoding='utf-8') as f:
                 f.write(track_info.lyrics)
