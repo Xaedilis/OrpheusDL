@@ -1,4 +1,6 @@
-import pickle, requests, errno, hashlib, math, os, re, operator
+import pickle, requests, errno, hashlib, math, os, re, operator, asyncio
+import aiohttp
+import aiofiles
 from tqdm import tqdm
 from PIL import Image, ImageChops
 from requests.adapters import HTTPAdapter
@@ -18,6 +20,25 @@ def create_requests_session():
     session_.mount('http://', HTTPAdapter(max_retries=retries))
     session_.mount('https://', HTTPAdapter(max_retries=retries))
     return session_
+
+def create_aiohttp_session():
+    """Create an aiohttp session with retry and timeout configuration"""
+    timeout = aiohttp.ClientTimeout(total=300, connect=30, sock_read=60)
+    
+    # Optimized connector settings for better concurrent performance
+    connector = aiohttp.TCPConnector(
+        limit=200,           # Increased total connection pool from 100 to 200
+        limit_per_host=50,   # Increased per-host connections from 30 to 50
+        enable_cleanup_closed=True,
+        use_dns_cache=False  # Disable DNS cache to avoid aiodns issues on Windows
+    )
+    
+    return aiohttp.ClientSession(
+        connector=connector,
+        timeout=timeout,
+        headers={'User-Agent': 'OrpheusDL/1.0'},
+        trust_env=True
+    )
 
 sanitise_name = lambda name: re.sub(r'[:]', ' - ', re.sub(r'[\\/*?"<>|$]', '', re.sub(r'[\x00-\x1F\x7F]', '', str(name).strip()))) if name else ''
 
@@ -40,9 +61,118 @@ def fix_byte_limit(path: str, byte_limit=250):
 
 r_session = create_requests_session()
 
+async def download_file_async(session, url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None, max_retries=3):
+    """Async version of download_file using aiohttp - returns (file_location, bytes_downloaded)"""
+    if os.path.isfile(file_location):
+        # File already exists - return 0 bytes downloaded
+        return (file_location, 0)
+
+    # Create directory structure if it doesn't exist
+    directory = os.path.dirname(file_location)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
+    bytes_downloaded = 0
+
+    for attempt in range(max_retries):
+        try:
+            async with session.get(url, headers=headers, ssl=False) as response:
+                response.raise_for_status()
+                
+                total = None
+                if 'content-length' in response.headers:
+                    total = int(response.headers['content-length'])
+
+                # Use aiofiles for async file writing
+                async with aiofiles.open(file_location, 'wb') as f:
+                    if enable_progress_bar and total:
+                        # Create indented progress bar with proper formatting
+                        import sys
+                        from io import StringIO
+                        
+                        class IndentedOutput:
+                            def __init__(self, indent_level):
+                                self.indent_level = indent_level
+                                
+                            def write(self, text):
+                                # Add indentation to each line
+                                lines = text.split('\n')
+                                indented_lines = []
+                                for line in lines:
+                                    if line.strip():  # Only indent non-empty lines
+                                        indented_lines.append(' ' * self.indent_level + line)
+                                    else:
+                                        indented_lines.append(line)
+                                sys.stdout.write('\n'.join(indented_lines))
+                                
+                            def flush(self):
+                                sys.stdout.flush()
+                        
+                        bar = tqdm(
+                            total=total, 
+                            unit='B', 
+                            unit_scale=True, 
+                            unit_divisor=1024, 
+                            initial=0, 
+                            miniters=1,
+                            leave=False,
+                            file=IndentedOutput(indent_level)
+                        )
+                        
+                        async for chunk in response.content.iter_chunked(8192):
+                            await f.write(chunk)
+                            bar.update(len(chunk))
+                            bytes_downloaded += len(chunk)
+                        bar.close()
+                    else:
+                        async for chunk in response.content.iter_chunked(8192):
+                            await f.write(chunk)
+                            bytes_downloaded += len(chunk)
+
+                # Handle artwork resizing if needed
+                if artwork_settings and artwork_settings.get('should_resize', False):
+                    new_resolution = artwork_settings.get('resolution', 1400)
+                    new_format = artwork_settings.get('format', 'jpeg')
+                    if new_format == 'jpg': new_format = 'jpeg'
+                    new_compression = artwork_settings.get('compression', 'low')
+                    if new_compression == 'low':
+                        new_compression = 90
+                    elif new_compression == 'high':
+                        new_compression = 70
+                    if new_format == 'png': new_compression = None
+                    with Image.open(file_location) as im:
+                        im = im.resize((new_resolution, new_resolution), Image.Resampling.BICUBIC)
+                        im.save(file_location, new_format, quality=new_compression)
+                
+                return (file_location, bytes_downloaded)
+                
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                continue
+            else:
+                # Clean up partial file on final failure
+                if os.path.isfile(file_location):
+                    try:
+                        os.remove(file_location)
+                    except:
+                        pass
+                raise e
+        except KeyboardInterrupt:
+            if os.path.isfile(file_location):
+                print(f'\tDeleting partially downloaded file "{str(file_location)}"')
+                silentremove(file_location)
+            raise KeyboardInterrupt
+
 def download_file(url, file_location, headers={}, enable_progress_bar=False, indent_level=0, artwork_settings=None):
+    """Synchronous wrapper for the async download function for backward compatibility"""
     if os.path.isfile(file_location):
         return None
+
+    # Create directory structure if it doesn't exist
+    directory = os.path.dirname(file_location)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
 
     r = r_session.get(url, stream=True, headers=headers, verify=False)
 
@@ -53,15 +183,38 @@ def download_file(url, file_location, headers={}, enable_progress_bar=False, ind
     try:
         with open(file_location, 'wb') as f:
             if enable_progress_bar and total:
-                try:
-                    columns = os.get_terminal_size().columns
-                    if os.name == 'nt':
-                        bar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, initial=0, miniters=1, ncols=(columns-indent_level), bar_format=' '*indent_level + '{l_bar}{bar}{r_bar}')
-                    else:
-                        raise
-                except:
-                    bar = tqdm(total=total, unit='B', unit_scale=True, unit_divisor=1024, initial=0, miniters=1, bar_format=' '*indent_level + '{l_bar}{bar}{r_bar}')
-                # bar.set_description(' '*indent_level)
+                # Create indented progress bar with proper formatting
+                import sys
+                from io import StringIO
+                
+                class IndentedOutput:
+                    def __init__(self, indent_level):
+                        self.indent_level = indent_level
+                        
+                    def write(self, text):
+                        # Add indentation to each line
+                        lines = text.split('\n')
+                        indented_lines = []
+                        for line in lines:
+                            if line.strip():  # Only indent non-empty lines
+                                indented_lines.append(' ' * self.indent_level + line)
+                            else:
+                                indented_lines.append(line)
+                        sys.stdout.write('\n'.join(indented_lines))
+                        
+                    def flush(self):
+                        sys.stdout.flush()
+                
+                bar = tqdm(
+                    total=total, 
+                    unit='B', 
+                    unit_scale=True, 
+                    unit_divisor=1024, 
+                    initial=0, 
+                    miniters=1,
+                    leave=False,
+                    file=IndentedOutput(indent_level)
+                )
                 for chunk in r.iter_content(chunk_size=1024):
                     if chunk:  # filter out keep-alive new chunks
                         f.write(chunk)
@@ -87,6 +240,9 @@ def download_file(url, file_location, headers={}, enable_progress_bar=False, ind
             print(f'\tDeleting partially downloaded file "{str(file_location)}"')
             silentremove(file_location)
         raise KeyboardInterrupt
+    
+    # Return the file location on successful download
+    return file_location
 
 # root mean square code by Charlie Clark: https://code.activestate.com/recipes/577630-comparing-two-images/
 def compare_images(image_1, image_2):
@@ -156,4 +312,10 @@ def save_to_temp(input: bytes):
 def download_to_temp(url, headers={}, extension='', enable_progress_bar=False, indent_level=0):
     location = create_temp_filename() + (('.' + extension) if extension else '')
     download_file(url, location, headers=headers, enable_progress_bar=enable_progress_bar, indent_level=indent_level)
+    return location
+
+async def download_to_temp_async(session, url, headers={}, extension='', enable_progress_bar=False, indent_level=0):
+    """Async version of download_to_temp"""
+    location = create_temp_filename() + (('.' + extension) if extension else '')
+    await download_file_async(session, url, location, headers=headers, enable_progress_bar=enable_progress_bar, indent_level=indent_level)
     return location

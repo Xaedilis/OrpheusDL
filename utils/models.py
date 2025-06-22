@@ -250,6 +250,7 @@ class ModuleController:
     printer_controller: Oprinter
     module_error: ClassMethodDescriptorType  # Will eventually be deprecated *sigh*
     gui_handlers: Dict = field(default_factory=dict)
+    progress_bar_enabled: bool = True
 
     def get_gui_handler(self, handler_name: str):
         """Retrieves a registered GUI handler function."""
