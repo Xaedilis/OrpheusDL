@@ -837,7 +837,8 @@ class Downloader:
         track_tags['release_date'] = track_info.tags.release_date if track_info.tags.release_date else ''
         track_tags['genres'] = ', '.join(track_info.tags.genres) if track_info.tags.genres else ''
         
-        # Add all documented format variables from GUI
+        # Add all documented format variables from GUI with default values
+        track_tags['track_number'] = str(track_info.tags.track_number) if track_info.tags.track_number else ''
         track_tags['total_tracks'] = str(track_info.tags.total_tracks) if track_info.tags.total_tracks else ''
         track_tags['disc_number'] = str(track_info.tags.disc_number) if track_info.tags.disc_number else ''
         track_tags['total_discs'] = str(track_info.tags.total_discs) if track_info.tags.total_discs else ''
@@ -854,7 +855,13 @@ class Downloader:
                 track_tags['disc_number'] = str(track_info.tags.disc_number).zfill(total_digits)
         
         # Get the appropriate format string
-        if album_location == self.path:  # Single track download
+        # Better detection for single track downloads
+        is_single_track_download = (
+            album_location == self.path or  # Original condition (CLI and proper single tracks)
+            (hasattr(self, 'download_mode') and self.download_mode is DownloadTypeEnum.track)  # Track download mode
+        )
+        
+        if is_single_track_download:
             format_string = self.global_settings['formatting']['single_full_path_format']
         else:  # Track in album/playlist
             format_string = self.global_settings['formatting']['track_filename_format']
