@@ -658,8 +658,6 @@ class Downloader:
                 self.print("Using sequential downloads for Apple Music")
             
             if concurrent_downloads > 1 and len(playlist_info.tracks) > 1:
-                self.print(f"Using {concurrent_downloads} concurrent downloads for {len(playlist_info.tracks)} tracks")
-                
                 # Prepare download arguments for all tracks
                 download_args_list = []
                 for index, track_id_or_info in enumerate(playlist_info.tracks, start=1):
@@ -982,7 +980,6 @@ class Downloader:
                 self.print("Using sequential downloads for Apple Music")
             
             if concurrent_downloads > 1 and number_of_tracks > 1:
-                
                 # Prepare download arguments for all tracks
                 download_args_list = []
                 for index, track_item in enumerate(album_info.tracks, start=1):
