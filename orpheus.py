@@ -258,7 +258,21 @@ def main():
         if not media_to_download:
             print('No links given')
 
-        orpheus_core_download(orpheus, media_to_download, tpm, sdm, path)
+        # Beatport quality workaround: high and low quality fail, fallback to lossless FLAC
+        original_quality = None
+        beatport_quality_override = False
+        if 'beatport' in media_to_download and orpheus.settings['global']['general']['download_quality'] in ['high', 'low']:
+            original_quality = orpheus.settings['global']['general']['download_quality']
+            orpheus.settings['global']['general']['download_quality'] = 'lossless'
+            beatport_quality_override = True
+            print(f' Beatport: Automatically switching from "{original_quality}" to "lossless" quality')
+
+        try:
+            orpheus_core_download(orpheus, media_to_download, tpm, sdm, path)
+        finally:
+            # Restore original quality setting if we overrode it
+            if beatport_quality_override and original_quality:
+                orpheus.settings['global']['general']['download_quality'] = original_quality
 
 
 if __name__ == "__main__":
