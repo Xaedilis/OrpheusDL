@@ -187,7 +187,7 @@ class Downloader:
             return {
                 'success': f'{GREEN}+{RESET}',      # Green plus sign for success
                 'skip': f'{YELLOW}>{RESET}',        # Yellow greater than for skip/already exists
-                'error': f'{RED}X{RESET}',          # Red X for error/failed
+                'error': f'{RED}X{RESET}',          # Red X for error/failed (keep original Windows behavior)
                 'warning': f'{YELLOW}!{RESET}',     # Yellow exclamation for warning/rate limited
                 'gray_text': GRAY,                  # Gray for general status text
                 'yellow_text': YELLOW,              # Yellow for "(already exists)" text
@@ -199,7 +199,7 @@ class Downloader:
             return {
                 'success': f'{GREEN}✓{RESET}',      # Green check mark
                 'skip': f'{YELLOW}▶{RESET}',        # Yellow play button
-                'error': f'{RED}✗{RESET}',          # Red ballot X
+                'error': '✗',                       # Plain ballot X for error/failed (let GUI handle coloring)
                 'warning': f'{YELLOW}⚠{RESET}',     # Yellow warning sign
                 'gray_text': GRAY,                  # Gray for general status text
                 'yellow_text': YELLOW,              # Yellow for "(already exists)" text
