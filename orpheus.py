@@ -4,6 +4,7 @@ os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 import argparse
 import re
+import json
 from urllib.parse import urlparse
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
@@ -13,7 +14,48 @@ except ModuleNotFoundError:
     SpotifyAuthError = None  # type: ignore
     SpotifyRateLimitDetectedError = None  # type: ignore
 
+def setup_ffmpeg_path():
+    """Setup FFmpeg path from settings.json to match GUI behavior"""
+    try:
+        # Try to load settings.json from config folder
+        settings_path = os.path.join("config", "settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # Get FFmpeg path setting
+            ffmpeg_path_setting = settings.get("global", {}).get("advanced", {}).get("ffmpeg_path", "ffmpeg")
+            print(f"[DEBUG] FFmpeg path from settings: '{ffmpeg_path_setting}'")
+            
+            if isinstance(ffmpeg_path_setting, str):
+                ffmpeg_path_setting = ffmpeg_path_setting.strip()
+                
+                # If it's a custom path (not just "ffmpeg"), add directory to PATH
+                if ffmpeg_path_setting and ffmpeg_path_setting.lower() != "ffmpeg":
+                    print(f"[DEBUG] Custom FFmpeg path detected: {ffmpeg_path_setting}")
+                    if os.path.isfile(ffmpeg_path_setting):
+                        ffmpeg_dir = os.path.dirname(ffmpeg_path_setting)
+                        if ffmpeg_dir:
+                            current_path = os.environ.get("PATH", "")
+                            if ffmpeg_dir not in current_path.split(os.pathsep):
+                                os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
+                                print(f"Added FFmpeg directory to PATH: {ffmpeg_dir}")
+                            else:
+                                print(f"[DEBUG] FFmpeg directory already in PATH: {ffmpeg_dir}")
+                    else:
+                        print(f"[DEBUG] FFmpeg file not found at: {ffmpeg_path_setting}")
+                else:
+                    print(f"[DEBUG] Using default 'ffmpeg' from PATH")
+        else:
+            print(f"[DEBUG] Settings file not found: {settings_path}")
+    except Exception as e:
+        # Don't fail if we can't setup FFmpeg path, just continue
+        print(f"Warning: Could not setup FFmpeg path: {e}")
+
 def main():
+    # Setup FFmpeg path from settings.json (same as GUI)
+    setup_ffmpeg_path()
+    
     print(r'''
    ____             _                    _____  _      
   / __ \           | |                  |  __ \| |     
