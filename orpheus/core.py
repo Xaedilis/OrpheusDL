@@ -385,8 +385,8 @@ class Orpheus:
             exit()
 
 
-def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path):
-    downloader = Downloader(orpheus_session.settings['global'], orpheus_session.module_controls, oprinter, output_path)
+def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path, use_ansi_colors=True):
+    downloader = Downloader(orpheus_session.settings['global'], orpheus_session.module_controls, oprinter, output_path, use_ansi_colors)
     downloader.full_settings = orpheus_session.settings  # Add access to full settings including modules
     os.makedirs('temp', exist_ok=True)
 
@@ -431,8 +431,8 @@ def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_par
                 elif mediatype is DownloadTypeEnum.track:
                     downloader.set_indent_number(1)  # Set proper indentation for track downloads
                     
-                    # For single track downloads, show Pass 1 only if there are multiple tracks
-                    pass_indicator = f" (Pass 1)" if total_items_in_batch > 1 else ""
+                    # For single track downloads, show Pass 1 only for Spotify (which has retry passes)
+                    pass_indicator = f" (Pass 1)" if (total_items_in_batch > 1 and mainmodule.lower() == 'spotify') else ""
                     if total_items_in_batch > 1:
                         # Track headers should have 8 spaces indentation (don't drop the indent level)
                         downloader.print(f'Track {index}/{total_items_in_batch}{pass_indicator}')

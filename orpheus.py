@@ -25,29 +25,20 @@ def setup_ffmpeg_path():
             
             # Get FFmpeg path setting
             ffmpeg_path_setting = settings.get("global", {}).get("advanced", {}).get("ffmpeg_path", "ffmpeg")
-            print(f"[DEBUG] FFmpeg path from settings: '{ffmpeg_path_setting}'")
             
             if isinstance(ffmpeg_path_setting, str):
                 ffmpeg_path_setting = ffmpeg_path_setting.strip()
                 
                 # If it's a custom path (not just "ffmpeg"), add directory to PATH
                 if ffmpeg_path_setting and ffmpeg_path_setting.lower() != "ffmpeg":
-                    print(f"[DEBUG] Custom FFmpeg path detected: {ffmpeg_path_setting}")
                     if os.path.isfile(ffmpeg_path_setting):
                         ffmpeg_dir = os.path.dirname(ffmpeg_path_setting)
                         if ffmpeg_dir:
                             current_path = os.environ.get("PATH", "")
                             if ffmpeg_dir not in current_path.split(os.pathsep):
                                 os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
-                                print(f"Added FFmpeg directory to PATH: {ffmpeg_dir}")
-                            else:
-                                print(f"[DEBUG] FFmpeg directory already in PATH: {ffmpeg_dir}")
-                    else:
-                        print(f"[DEBUG] FFmpeg file not found at: {ffmpeg_path_setting}")
-                else:
-                    print(f"[DEBUG] Using default 'ffmpeg' from PATH")
         else:
-            print(f"[DEBUG] Settings file not found: {settings_path}")
+            pass  # Settings file not found, using defaults
     except Exception as e:
         # Don't fail if we can't setup FFmpeg path, just continue
         print(f"Warning: Could not setup FFmpeg path: {e}")
@@ -83,6 +74,11 @@ def main():
     args = parser.parse_args()
 
     orpheus = Orpheus(args.private)
+    
+    # Set global progress bar setting for the CLI
+    from utils.utils import set_progress_bars_enabled
+    progress_bar_setting = orpheus.settings.get('global', {}).get('general', {}).get('progress_bar', False)
+    set_progress_bars_enabled(progress_bar_setting)
     if not args.arguments:
         parser.print_help()
         exit()
@@ -178,7 +174,7 @@ def main():
                             else:
                                 print(f'{str(index)}. {item.name} {additional_details}')
                         
-                        selection_input = input('Selection: ')
+                        selection_input = input('Selection: ').strip('\r\n ')
                         if selection_input.lower() in ['e', 'q', 'x', 'exit', 'quit']: exit()
                         if not selection_input.isdigit(): raise Exception('Input a number')
                         selection = int(selection_input)-1

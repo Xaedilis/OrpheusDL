@@ -94,10 +94,23 @@ def simplify_error_message(error_str: str) -> str:
     if 'status code 404' in error_lower or 'error 404' in error_lower:
         return "This song is unavailable."
     
+    # Apple Music errors
+    if 'apple music' in error_lower:
+        if 'unexpected error during download' in error_lower:
+            # Check if it's likely an FFmpeg/processing issue
+            if any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux', 'expected']):
+                return "Apple Music streaming error (FFmpeg required for processing)"
+            return "Apple Music download error"
+        elif any(keyword in error_lower for keyword in ['ffmpeg', 'remux', 'processing', 'legacy remux']):
+            return "Apple Music streaming error (FFmpeg required for processing)"
+        elif 'not authenticated' in error_lower or 'cookies.txt' in error_lower:
+            return "Apple Music authentication error (cookies.txt required)"
+        return "Apple Music error"
+    
     # SoundCloud HLS streaming errors
-    if 'soundcloud' in error_lower and 'hls' in error_lower:
-        if 'ffmpeg' in error_lower or 'url' in error_lower:
-            return "SoundCloud streaming error (HLS/FFmpeg issue)"
+    if 'soundcloud' in error_lower and ('hls' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower):
+        if 'ffmpeg' in error_lower or 'url' in error_lower or 'hls_unexpected_error_in_try_block' in error_lower:
+            return "SoundCloud streaming error (FFmpeg required for HLS streams)"
         return "SoundCloud streaming error"
     
     # Generic FFmpeg errors
@@ -143,7 +156,7 @@ def json_enum_serializer(obj):
 
 
 class Downloader:
-    def __init__(self, settings, module_controls, oprinter, path):
+    def __init__(self, settings, module_controls, oprinter, path, use_ansi_colors=True):
         self.global_settings = settings
         self.module_controls = module_controls
         self.oprinter = oprinter
@@ -159,6 +172,7 @@ class Downloader:
         self.loaded_modules = module_controls['loaded_modules']
         self.load_module = module_controls['module_loader']
         self.full_settings = None  # Will be set by core.py
+        self.use_ansi_colors = use_ansi_colors
 
         self.print = self.oprinter.oprint
         self.set_indent_number = self.oprinter.set_indent_number
@@ -172,8 +186,7 @@ class Downloader:
             pass
         return 30  # Default fallback
 
-    @staticmethod
-    def _get_status_symbols():
+    def _get_status_symbols(self):
         """Get platform-appropriate status symbols with universal colors"""
         # ANSI color codes that work across Windows, macOS, and Linux
         GREEN = '\033[92m'    # Green for success
@@ -181,6 +194,18 @@ class Downloader:
         RED = '\033[91m'      # Red for error
         GRAY = '\033[90m'     # Gray for status text
         RESET = '\033[0m'     # Reset to default color
+        
+        if not self.use_ansi_colors:
+            return {
+                'success': '✓',
+                'skip': '▶',
+                'error': '✗',
+                'warning': '⚠',
+                'gray_text': '',
+                'yellow_text': '',
+                'red_text': '',
+                'reset': ''
+            }
         
         # Use ASCII symbols for Windows Command Prompt compatibility
         if platform.system() == 'Windows':
@@ -199,7 +224,7 @@ class Downloader:
             return {
                 'success': f'{GREEN}✓{RESET}',      # Green check mark
                 'skip': f'{YELLOW}▶{RESET}',        # Yellow play button
-                'error': '✗',                       # Plain ballot X for error/failed (let GUI handle coloring)
+                'error': f'{RED}✗{RESET}',          # Red ballot X for error/failed
                 'warning': f'{YELLOW}⚠{RESET}',     # Yellow warning sign
                 'gray_text': GRAY,                  # Gray for general status text
                 'yellow_text': YELLOW,              # Yellow for "(already exists)" text
@@ -284,6 +309,12 @@ class Downloader:
                     track_info = await loop.run_in_executor(None, get_track_info_wrapper)
                     track_name = f"{', '.join(track_info.artists)} - {track_info.name}"
                     
+                    # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
+                    if track_info:
+                        track_location = self._create_track_location(args.get('album_location', ''), track_info)
+                        if await loop.run_in_executor(None, os.path.isfile, track_location):
+                            return (index, track_name, "SKIPPED", None, None, 0, 0)
+                    
                     # SINGLE API CALL: Get download info once - IN THREAD POOL
                     def get_download_info_wrapper():
                         # Check if track_info has download_extra_kwargs (like Qobuz, TIDAL, Deezer)
@@ -356,6 +387,11 @@ class Downloader:
         async def run_concurrent_downloads():
             """Main async function to coordinate downloads"""
             nonlocal total_bytes_downloaded
+            
+            # Disable progress bars globally if the setting is disabled
+            from utils.utils import set_progress_bars_enabled
+            progress_bar_setting = self.global_settings['general'].get('progress_bar', False)
+            set_progress_bars_enabled(progress_bar_setting)
             
             async with create_aiohttp_session() as session:
                 # Create semaphore to limit concurrent downloads
@@ -484,7 +520,8 @@ class Downloader:
                 original_print(f"Download speed: {overall_speed_mbps:.0f} Mbps", drop_level=performance_summary_indent)
                 original_print(f"Download time: {time_str}", drop_level=performance_summary_indent)
             else:
-                original_print(f"Download time: {time_str}, all tracks already existed", drop_level=performance_summary_indent)
+                # Don't assume tracks already existed - they might have failed
+                original_print(f"Download time: {time_str}", drop_level=performance_summary_indent)
         
         # Convert results to expected format
         for index, download_result, error in results_temp:
@@ -498,6 +535,11 @@ class Downloader:
         
         # Show final summary only when there are failures
         if actual_failed > 0:
+            # Check if most failures are SoundCloud FFmpeg-related
+            ffmpeg_errors = sum(1 for r in results if r and r[2] is not None and 
+                              isinstance(r[2], Exception) and 
+                              'FFmpeg required for HLS streams' in str(r[2]))
+            
             if actual_downloaded > 0 and actual_already_existed > 0:
                 original_print(f"Summary: {actual_downloaded} downloaded, {actual_already_existed} already existed, {actual_failed} failed.", drop_level=performance_summary_indent)
             elif actual_downloaded > 0:
@@ -506,6 +548,13 @@ class Downloader:
                 original_print(f"Summary: {actual_already_existed} already existed, {actual_failed} failed.", drop_level=performance_summary_indent)
             else:
                 original_print(f"Summary: {actual_failed} failed.", drop_level=performance_summary_indent)
+            
+            # Add helpful FFmpeg message if many SoundCloud HLS errors occurred
+            if ffmpeg_errors > 0 and ffmpeg_errors >= actual_failed * 0.8:  # 80% or more are FFmpeg errors
+                original_print("", drop_level=performance_summary_indent)  # Blank line
+                original_print("NOTE: Most failures are due to missing FFmpeg.", drop_level=performance_summary_indent)
+                original_print("SoundCloud requires FFmpeg for HLS stream processing.", drop_level=performance_summary_indent)
+                original_print("Please install FFmpeg or configure it in Settings > Global > Advanced.", drop_level=performance_summary_indent)
         
         return results
 
@@ -580,7 +629,7 @@ class Downloader:
         
         if playlist_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
             self.print('Downloading animated playlist cover')
-            download_file(playlist_info.animated_cover_url, playlist_path + 'cover.mp4', enable_progress_bar=True)
+            download_file(playlist_info.animated_cover_url, playlist_path + 'cover.mp4', enable_progress_bar=self.global_settings['general'].get('progress_bar', False))
         
         if playlist_info.description:
             with open(playlist_path + 'description.txt', 'w', encoding='utf-8') as f: f.write(playlist_info.description)
@@ -642,20 +691,29 @@ class Downloader:
             # Get concurrent downloads setting
             concurrent_downloads = self.global_settings['general'].get('concurrent_downloads', 1)
             
-            # Force sequential downloads for Spotify due to rate limiting
-            # Limit Apple Music to 3 concurrent downloads for I/O stability
+            # Force sequential downloads for specific modules or when concurrent_downloads is 1
             service_name_lower = ""
             if hasattr(self, 'service_name') and self.service_name:
                 service_name_lower = self.service_name.lower()
             
-            if service_name_lower == 'spotify':
-                concurrent_downloads = 1
-                print()  # Add blank line before sequential downloads message
-                self.print("Using sequential downloads for Spotify (rate limiting protection)")
+            # Check if sequential downloads should be forced
+            force_sequential = False
+            sequential_reason = ""
+            
+            if concurrent_downloads == 1:
+                force_sequential = True
+                sequential_reason = "concurrent_downloads setting is 1"
+            elif service_name_lower == 'spotify':
+                force_sequential = True
+                sequential_reason = "Spotify (rate limiting protection)"
             elif service_name_lower == 'applemusic':
+                force_sequential = True
+                sequential_reason = "Apple Music"
+            
+            if force_sequential:
                 concurrent_downloads = 1
                 print()  # Add blank line before sequential downloads message
-                self.print("Using sequential downloads for Apple Music")
+                self.print(f"Using sequential downloads for {sequential_reason}")
             
             if concurrent_downloads > 1 and len(playlist_info.tracks) > 1:
                 # Prepare download arguments for all tracks
@@ -699,7 +757,9 @@ class Downloader:
                 for index, track_id_or_info in enumerate(playlist_info.tracks, start=1):
                     self.set_indent_number(2)
                     print() # Add spacing between track attempts
-                    self.print(f'Track {index}/{number_of_tracks} (Pass 1)', drop_level=1)
+                    # Only show "Pass 1" for Spotify (which has retry passes)
+                    pass_indicator = " (Pass 1)" if service_name_lower == 'spotify' else ""
+                    self.print(f'Track {index}/{number_of_tracks}{pass_indicator}', drop_level=1)
                     
                     # Determine the actual track ID string to use for download_track
                     actual_track_id_str_for_download = track_id_or_info.id if isinstance(track_id_or_info, TrackInfo) else str(track_id_or_info)
@@ -895,40 +955,22 @@ class Downloader:
 
         if album_info.animated_cover_url and self.global_settings['covers']['save_animated_cover']:
             self.print('Downloading animated album cover')
-            download_file(album_info.animated_cover_url, album_path + 'cover.mp4', enable_progress_bar=True)
+            download_file(album_info.animated_cover_url, album_path + 'cover.mp4', enable_progress_bar=self.global_settings['general'].get('progress_bar', True))
 
         if album_info.description:
             with open(album_path + 'description.txt', 'w', encoding='utf-8') as f:
                 f.write(album_info.description)  # Also add support for this with singles maybe?
 
     def download_album(self, album_id, artist_name='', path=None, indent_level=1, extra_kwargs=None):
+        # Set indent
         self.set_indent_number(indent_level)
+        d_print = self.oprinter.oprint
+        symbols = self._get_status_symbols()
 
-        service_name_lower = ""
-        if hasattr(self, 'service_name') and self.service_name:
-            service_name_lower = self.service_name.lower()
-
-        if service_name_lower == 'spotify':
-            spotify_kwargs = {}
-            if extra_kwargs:
-                spotify_kwargs.update(extra_kwargs)
-            album_info: AlbumInfo = self.service.get_album_info(album_id, **spotify_kwargs)
-        elif service_name_lower == 'soundcloud':
-            soundcloud_data_payload = None
-            if extra_kwargs and 'data' in extra_kwargs:
-                soundcloud_data_payload = extra_kwargs['data']
-                logging.debug(f"SoundCloud (album_id: {album_id}): Extracted 'data' from extra_kwargs to pass to get_album_info.")
-            else:
-                logging.warning(f"SoundCloud (album_id: {album_id}): extra_kwargs missing or malformed. Passing None as data to get_album_info, which may cause errors in the unmodified SoundCloud module.")
-            album_info: AlbumInfo = self.service.get_album_info(album_id, data=soundcloud_data_payload)
-        elif service_name_lower == 'qobuz':
-            qobuz_kwargs = {}
-            if extra_kwargs:
-                qobuz_kwargs.update(extra_kwargs)
-            album_info: AlbumInfo = self.service.get_album_info(album_id, **qobuz_kwargs)
-        else:
-            # For other non-Spotify, non-SoundCloud, non-Qobuz services
-            album_info: AlbumInfo = self.service.get_album_info(album_id, data=extra_kwargs)
+        # Get album info - use indent level 1 to match album details
+        self.set_indent_number(1)
+        self.print(f'Fetching data. Please wait...')
+        album_info: AlbumInfo = self.service.get_album_info(album_id, **(extra_kwargs or {}))
 
         if not album_info:
             logging.warning(f"Could not retrieve album info for {album_id} from {self.service_name}. Skipping album.")
@@ -966,18 +1008,28 @@ class Downloader:
             # Get concurrent downloads setting
             concurrent_downloads = self.global_settings['general'].get('concurrent_downloads', 1)
             
-            # Force sequential downloads for Spotify due to rate limiting
-            # Limit Apple Music to 3 concurrent downloads for I/O stability
+            # Force sequential downloads for specific modules or when concurrent_downloads is 1
             service_name_lower = ""
             if hasattr(self, 'service_name') and self.service_name:
                 service_name_lower = self.service_name.lower()
             
-            if service_name_lower == 'spotify':
-                concurrent_downloads = 1
-                self.print("Using sequential downloads for Spotify (rate limiting protection)")
+            # Check if sequential downloads should be forced
+            force_sequential = False
+            sequential_reason = ""
+            
+            if concurrent_downloads == 1:
+                force_sequential = True
+                sequential_reason = "concurrent_downloads setting is 1"
+            elif service_name_lower == 'spotify':
+                force_sequential = True
+                sequential_reason = "Spotify (rate limiting protection)"
             elif service_name_lower == 'applemusic':
+                force_sequential = True
+                sequential_reason = "Apple Music"
+            
+            if force_sequential:
                 concurrent_downloads = 1
-                self.print("Using sequential downloads for Apple Music")
+                self.print(f"Using sequential downloads for {sequential_reason}")
             
             if concurrent_downloads > 1 and number_of_tracks > 1:
                 # Prepare download arguments for all tracks
@@ -1077,8 +1129,8 @@ class Downloader:
                                 self.print("Pausing 30 seconds to prevent rate limiting...", drop_level=1)
                                 time.sleep(30)
                 else:
-                    # Only show rate limiting message for Spotify and Apple Music (where it's relevant)
-                    if service_name_lower in ['spotify', 'applemusic']:
+                    # Only show rate limiting message for Spotify (where it's relevant)
+                    if service_name_lower == 'spotify':
                         # Force rate limiting message to have exactly 8 spaces indentation
                         current_indent = self.indent_number
                         self.set_indent_number(1)
@@ -1095,7 +1147,9 @@ class Downloader:
                     self.set_indent_number(track_indent_level)
                     # Track headers should be indented (8 spaces) in regular album downloads, no drop for artist downloads
                     drop_level_for_track = 1 if self.download_mode is DownloadTypeEnum.artist else 0
-                    self.print(f'Track {index}/{number_of_tracks} (Pass 1)', drop_level=drop_level_for_track)
+                    # Only show "Pass 1" for Spotify (which has retry passes)
+                    pass_indicator = " (Pass 1)" if service_name_lower == 'spotify' else ""
+                    self.print(f'Track {index}/{number_of_tracks}{pass_indicator}', drop_level=drop_level_for_track)
                     track_id_to_download = track_item.id if hasattr(track_item, 'id') else track_item # Check for .id attribute
                     # For artist downloads, check if we're processing album tracks (indent_level > 1) or individual tracks
                     # For regular album downloads, use indent level 1 (8 spaces) for track content
@@ -1114,6 +1168,7 @@ class Downloader:
                         pause_seconds = self._get_spotify_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
+                        print()  # Add blank line after pause message for consistent spacing with playlists
                     
                     # Collect rate-limited tracks for retry
                     if download_result == "RATE_LIMITED":
@@ -1171,8 +1226,8 @@ class Downloader:
                                 self.print("Pausing 30 seconds to prevent rate limiting...", drop_level=1)
                                 time.sleep(30)
                 else:
-                    # Only show rate limiting message for Spotify and Apple Music (where it's relevant)
-                    if service_name_lower in ['spotify', 'applemusic']:
+                    # Only show rate limiting message for Spotify (where it's relevant)
+                    if service_name_lower == 'spotify':
                         # Force rate limiting message to have exactly 8 spaces indentation
                         current_indent = self.indent_number
                         self.set_indent_number(1)
@@ -1389,7 +1444,9 @@ class Downloader:
                 
                 for index, track_id in enumerate(tracks_to_download, start=1):
                     print()  # Add blank line before each track in artist downloads
-                    self.print(f'Track {index}/{number_of_tracks_new} (Pass 1)', drop_level=1)
+                    # Only show "Pass 1" for Spotify (which has retry passes)
+                    pass_indicator = " (Pass 1)" if service_name_lower == 'spotify' else ""
+                    self.print(f'Track {index}/{number_of_tracks_new}{pass_indicator}', drop_level=1)
                     download_result = self.download_track(track_id, album_location=artist_path, main_artist=artist_name, number_of_tracks=1, indent_level=1, extra_kwargs=artist_info.track_extra_kwargs)
                     
                     # Add pause between downloads for Spotify to prevent rate limiting
@@ -1399,6 +1456,7 @@ class Downloader:
                         pause_seconds = self._get_spotify_pause_seconds()
                         self.print(f'Pausing {pause_seconds} seconds to prevent rate limiting...', drop_level=1)
                         time.sleep(pause_seconds)
+                        print()  # Add blank line after pause message for consistent spacing
                     
                     # Collect rate-limited tracks for retry
                     if download_result == "RATE_LIMITED":
@@ -1495,6 +1553,13 @@ class Downloader:
                 
                 # First get track info
                 track_info = await loop.run_in_executor(None, get_track_info_fallback)
+                
+                # Check if file already exists BEFORE getting download info (for temp file modules like Deezer)
+                if track_info:
+                    track_location = self._create_track_location(album_location, track_info)
+                    if await loop.run_in_executor(None, os.path.isfile, track_location):
+                        return "ALREADY_EXISTS"
+                
                 # Then get download info using the track_info
                 download_info = await loop.run_in_executor(None, get_download_info_fallback, track_info)
             except Exception as e:
@@ -1675,9 +1740,13 @@ class Downloader:
 
     def download_track(self, track_id, album_location='', main_artist='', track_index=0, number_of_tracks=0, cover_temp_location='', indent_level=1, m3u_playlist=None, extra_kwargs={}, verbose=True):
         self.set_indent_number(indent_level)
-        
+        # Aliasing for convenience.
+        d_print = self.oprinter.oprint
+        symbols = self._get_status_symbols()
+        track_info: TrackInfo = None
+        download_info: TrackDownloadInfo = None
+        temp_filename = None
 
-        
         # Removed: blank line before single track downloads - only add blank line after completion
 
         # Use a dummy print function when not verbose
@@ -1843,7 +1912,7 @@ class Downloader:
             symbols = self._get_status_symbols()
             d_print(f'=== {symbols["skip"]} Track skipped ===', drop_level=header_drop_level)
 
-            return return_with_blank_line(None)
+            return return_with_blank_line("SKIPPED")
 
 
         # Download lyrics
@@ -1975,7 +2044,8 @@ class Downloader:
                         else:
                             d_print(f'Request failed')
                     else:
-                        d_print(f'Download failed: {error_msg.split(":")[0] if ":" in error_msg else error_msg[:50]}')
+                        simplified_error = simplify_error_message(error_msg)
+                        d_print(f'Download failed: {simplified_error}')
                     symbols = self._get_status_symbols()
                     d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                     # Restore original indent level if it was adjusted
@@ -2003,7 +2073,8 @@ class Downloader:
                     else:
                         d_print(f'Request failed')
                 else:
-                    d_print(f'Download failed: {error_msg.split(":")[0] if ":" in error_msg else error_msg[:50]}')
+                    simplified_error = simplify_error_message(error_msg)
+                    d_print(f'Download failed: {simplified_error}')
                 symbols = self._get_status_symbols()
                 d_print(f'=== {symbols["error"]} Track failed ===', drop_level=header_drop_level)
                 # Restore original indent level if it was adjusted
@@ -2025,7 +2096,7 @@ class Downloader:
                 download_info.file_url,
                 track_location,
                 headers=download_info.file_url_headers,
-                enable_progress_bar=self.global_settings['general'].get('progress_bar', True) and verbose,
+                enable_progress_bar=self.global_settings['general'].get('progress_bar', False) and verbose,
                 indent_level=self.indent_number
             ) if download_info.download_type is DownloadEnum.URL else shutil.move(download_info.temp_file_path, track_location)
             
@@ -2309,7 +2380,16 @@ class Downloader:
             return (new_track_location, old_track_location, old_container)
             
         except Exception as e:
-            d_print(f'❌ Conversion error: {e}')
+            # Check if it's an FFmpeg-related error and provide user-friendly message
+            error_str = str(e)
+            if any(indicator in error_str.lower() for indicator in [
+                'winerror 2', 'errno 2', 'no such file or directory', 
+                'het systeem kan het opgegeven bestand niet vinden',
+                'file not found', 'ffmpeg', 'executable not found'
+            ]):
+                d_print(f'❌ Conversion error: FFmpeg was not found or is misconfigured. This is required for audio conversion.')
+            else:
+                d_print(f'❌ Conversion error: {e}')
             return (file_path, None, None)  # Return tuple like old version
 
     def _get_artwork_settings(self, module_name = None, is_external = False):
