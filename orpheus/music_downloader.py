@@ -2261,7 +2261,7 @@ class Downloader:
                 conversions = {CodecEnum[k.upper()]: CodecEnum[v.upper()] for k, v in self.global_settings['advanced']['codec_conversions'].items()}
             except:
                 conversions = {}
-                d_print('Warning: codec_conversions setting is invalid!')
+                print('Warning: codec_conversions setting is invalid!')  # Always print this warning
                 return (file_path, None, None)  # Return tuple like old version
             
             if not conversions:
@@ -2281,32 +2281,33 @@ class Downloader:
             old_codec_data = codec_data[codec]
             new_codec_data = codec_data[new_codec]
             
-            d_print(f'Converting to {new_codec_data.pretty_name}...')
+            # Always print conversion status, even when verbose=False
+            print(f'        Converting {old_codec_data.pretty_name} to {new_codec_data.pretty_name}...')
             
             # Check for spatial formats (skip conversion)
             if old_codec_data.spatial or new_codec_data.spatial:
-                d_print('Warning: converting spatial formats is not allowed, skipping')
+                print('        Warning: converting spatial formats is not allowed, skipping')
                 return (file_path, None, None)
             
             # Check for undesirable conversions (fixed logic but matching old version behavior)
             enable_undesirable = self.global_settings.get('advanced', {}).get('enable_undesirable_conversions', False)
             if not old_codec_data.lossless and new_codec_data.lossless and not enable_undesirable:
-                d_print('Warning: Undesirable lossy-to-lossless conversion detected, skipping')
+                print('        Warning: Undesirable lossy-to-lossless conversion detected, skipping')
                 return (file_path, None, None)
             # Note: lossy-to-lossy conversions are allowed by default (old version had a bug that made this always allowed)
             
             # Warn about undesirable conversions but continue (matching old version)
             if not old_codec_data.lossless and new_codec_data.lossless:
-                d_print('Warning: Undesirable lossy-to-lossless conversion')
+                print('        Warning: Undesirable lossy-to-lossless conversion')
             elif not old_codec_data.lossless and not new_codec_data.lossless:
-                d_print('Warning: Undesirable lossy-to-lossy conversion')
+                print('        Warning: Undesirable lossy-to-lossy conversion')
             
             # Get conversion flags
             try:
                 conversion_flags = {CodecEnum[k.upper()]:v for k,v in self.global_settings['advanced']['conversion_flags'].items()}
             except:
                 conversion_flags = {}
-                d_print('Warning: conversion_flags setting is invalid, using defaults')
+                print('        Warning: conversion_flags setting is invalid, using defaults')
             
             conv_flags = conversion_flags[new_codec] if new_codec in conversion_flags else {}
             
@@ -2385,6 +2386,8 @@ class Downloader:
             else:
                 silentremove(file_path)
             
+            print(f'        ✅ Conversion completed: {new_track_location}')
+            
             # Return tuple: (new_location, old_location_if_kept, old_container_if_kept)
             return (new_track_location, old_track_location, old_container)
             
@@ -2396,9 +2399,10 @@ class Downloader:
                 'het systeem kan het opgegeven bestand niet vinden',
                 'file not found', 'ffmpeg', 'executable not found'
             ]):
-                d_print(f'❌ Conversion error: FFmpeg was not found or is misconfigured. This is required for audio conversion.')
+                print(f'        ❌ Conversion error: FFmpeg was not found or is misconfigured. This is required for audio conversion.')
+                print(f'        💡 Solution: Install FFmpeg or set the path in Settings > Global > Advanced > FFmpeg Path')
             else:
-                d_print(f'❌ Conversion error: {e}')
+                print(f'        ❌ Conversion error: {e}')
             return (file_path, None, None)  # Return tuple like old version
 
     def _get_artwork_settings(self, module_name = None, is_external = False):
