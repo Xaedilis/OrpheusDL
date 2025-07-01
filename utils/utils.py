@@ -1,7 +1,27 @@
 import pickle, requests, errno, hashlib, math, os, re, operator, asyncio
 import aiohttp
 import aiofiles
-from tqdm import tqdm
+from tqdm import tqdm as original_tqdm
+import threading
+
+# Global flag for progress bar settings (more reliable than thread-local in async contexts)
+_progress_bars_enabled = True
+_progress_bars_lock = threading.Lock()
+
+def tqdm(*args, **kwargs):
+    """Custom tqdm wrapper that respects global progress bar settings"""
+    # Check if progress bars are globally disabled
+    global _progress_bars_enabled
+    with _progress_bars_lock:
+        if not _progress_bars_enabled:
+            kwargs['disable'] = True
+    return original_tqdm(*args, **kwargs)
+
+def set_progress_bars_enabled(enabled):
+    """Set whether progress bars should be enabled globally"""
+    global _progress_bars_enabled
+    with _progress_bars_lock:
+        _progress_bars_enabled = enabled
 from PIL import Image, ImageChops
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
