@@ -212,7 +212,7 @@ class Downloader:
             return {
                 'success': f'{GREEN}+{RESET}',      # Green plus sign for success
                 'skip': f'{YELLOW}>{RESET}',        # Yellow greater than for skip/already exists
-                'error': f'{RED}X{RESET}',          # Red X for error/failed (keep original Windows behavior)
+                'error': f'{RED}x{RESET}',          # Red lowercase x for error/failed
                 'warning': f'{YELLOW}!{RESET}',     # Yellow exclamation for warning/rate limited
                 'gray_text': GRAY,                  # Gray for general status text
                 'yellow_text': YELLOW,              # Yellow for "(already exists)" text
@@ -353,7 +353,7 @@ class Downloader:
                     if file_location is None:
                         # Track already existed or failed
                         if bytes_downloaded == 0:
-                            return (index, track_name, "SKIPPED", None, None, 0, track_duration)
+                            return (index, track_name, "ERROR", None, Exception("Download failed"), 0, track_duration)
                         else:
                             return (index, track_name, "ERROR", None, Exception("Download failed"), 0, track_duration)
                     else:
@@ -936,7 +936,10 @@ class Downloader:
             CodecEnum.OPUS: '.opus',
             CodecEnum.VORBIS: '.ogg',
             CodecEnum.WAV: '.wav',
-            CodecEnum.AIFF: '.aiff'
+            CodecEnum.AIFF: '.aiff',
+            CodecEnum.AC4: '.ac4',
+            CodecEnum.AC3: '.ac3',
+            CodecEnum.EAC3: '.eac3'
         }
         extension = codec_extensions.get(track_info.codec, '.flac')  # Default to .flac
         track_filename += extension
@@ -1680,7 +1683,10 @@ class Downloader:
                 '.opus': ContainerEnum.opus,
                 '.ogg': ContainerEnum.ogg,
                 '.wav': ContainerEnum.wav,
-                '.aiff': ContainerEnum.aiff
+                '.aiff': ContainerEnum.aiff,
+                '.ac4': ContainerEnum.ac4,
+                '.ac3': ContainerEnum.ac3,
+                '.eac3': ContainerEnum.eac3
             }
             container = container_map.get(file_extension, ContainerEnum.flac)
             
@@ -2175,7 +2181,10 @@ class Downloader:
                 '.opus': ContainerEnum.opus,
                 '.ogg': ContainerEnum.ogg,
                 '.wav': ContainerEnum.wav,
-                '.aiff': ContainerEnum.aiff
+                '.aiff': ContainerEnum.aiff,
+                '.ac4': ContainerEnum.ac4,
+                '.ac3': ContainerEnum.ac3,
+                '.eac3': ContainerEnum.eac3
             }
             container = container_map.get(file_extension, ContainerEnum.flac)
             
