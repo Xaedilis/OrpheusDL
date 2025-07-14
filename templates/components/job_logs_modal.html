@@ -1,0 +1,24 @@
+<div id="jobLogsModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Job Logs</h3>
+            <span class="close" onclick="closeJobLogsModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div class="logs-info">
+                <p><strong>Job ID:</strong> <span id="logsJobId"></span></p>
+                <p><strong>Status:</strong> <span id="logsJobStatus"></span></p>
+            </div>
+            <div class="logs-controls">
+                <button onclick="refreshJobLogs()" class="refresh-logs-btn">Refresh</button>
+                <button onclick="downloadJobLogs()" class="download-logs-btn">Download</button>
+                <label>
+                    <input type="checkbox" id="autoScrollLogs" checked> Auto-scroll
+                </label>
+            </div>
+            <div id="jobLogsContent" class="logs-content">
+                <p>Loading logs...</p>
+            </div>
+        </div>
+    </div>
+</div>

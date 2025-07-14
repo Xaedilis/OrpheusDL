@@ -1,0 +1,14 @@
+
+<div class="section">
+    <h2>Download Jobs</h2>
+    <div class="jobs-controls">
+        <button onclick="refreshJobs()" class="refresh-btn">Refresh Jobs</button>
+        <button onclick="clearCompletedJobs()" class="clear-btn">Clear Completed</button>
+        <label>
+            <input type="checkbox" id="autoRefresh" checked> Auto-refresh (10s)
+        </label>
+    </div>
+    <div id="jobsResults" class="results">
+        <p>Loading jobs...</p>
+    </div>
+</div>
