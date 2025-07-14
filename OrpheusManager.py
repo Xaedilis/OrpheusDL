@@ -104,7 +104,255 @@ class OrpheusManager:
 
     async def search_with_credentials(self, platform: str, query: str, username: str, password: str,
                                       page: int = 1, limit: int = 20, group_by_album: bool = False):
-        """Search using provided credentials with pagination and grouping - mimics orpheus.py CLI behavior"""
+        """Search with username/password credentials and optional album grouping with pagination support"""
+        try:
+            # Normalize platform name
+            platform_name = platform.lower()
+            if platform_name == 'apple':
+                platform_name = 'applemusic'
+
+            print(f"Searching on platform {platform_name} with query: {query}")
+            print(f"Group by album: {group_by_album}, Limit: {limit}")
+
+            module = self.orpheus.load_module(platform_name)
+
+            if platform_name == 'applemusic':
+                print("Using Apple Music with cookie authentication")
+
+                # Check if the module is properly authenticated
+                if not hasattr(module, 'is_authenticated') or not module.is_authenticated:
+                    raise Exception(
+                        "Apple Music module not authenticated. Please check your cookies.txt file in the /config folder.")
+
+                print("Apple Music authentication verified successfully")
+
+                # Apple Music API has a 50 result limit per request, so we need to paginate
+                all_tracks = []
+                total_fetched = 0
+                offset = 0
+                page_size = 50  # Apple Music's max limit
+
+                while total_fetched < limit:
+                    # Calculate how many results to fetch in this request
+                    current_limit = min(page_size, limit - total_fetched)
+
+                    print(f"Fetching page with offset {offset}, limit {current_limit}")
+
+                    # Use the Apple Music API directly for pagination
+                    try:
+                        # Access the Apple Music API from the module
+                        apple_api = module.apple_music_api
+                        search_results = apple_api.search(
+                            term=query,
+                            types="songs",
+                            limit=current_limit,
+                            offset=offset
+                        )
+
+                        print(f"Search results type: {type(search_results)}")
+                        print(f"Search results content: {search_results}")
+
+                        # Validate search results structure
+                        if not isinstance(search_results, dict):
+                            print(f"Error: Expected dict, got {type(search_results)}")
+                            break
+
+                        # Extract songs from search results
+                        songs_data = search_results.get('songs', {})
+                        if not isinstance(songs_data, dict):
+                            print(f"Error: songs data is not a dict: {type(songs_data)}")
+                            break
+
+                        songs = songs_data.get('data', [])
+                        if not isinstance(songs, list):
+                            print(f"Error: songs.data is not a list: {type(songs)}")
+                            break
+
+                        if not songs:
+                            print("No more results available")
+                            break
+
+                        print(f"Found {len(songs)} songs in this page")
+
+                        # Convert Apple Music API results to our format
+                        for song_data in songs:
+                            try:
+                                # Validate song data structure
+                                if not isinstance(song_data, dict):
+                                    print(f"Warning: song_data is not a dict: {type(song_data)}")
+                                    continue
+
+                                attributes = song_data.get('attributes', {})
+                                if not isinstance(attributes, dict):
+                                    print(f"Warning: attributes is not a dict: {type(attributes)}")
+                                    continue
+
+                                # Extract basic info
+                                song_id = song_data.get('id')
+                                song_name = attributes.get('name')
+                                artist_name = attributes.get('artistName', 'Unknown Artist')
+                                album_name = attributes.get('albumName', 'Unknown Album')
+                                release_date = attributes.get('releaseDate', '')
+                                duration_ms = attributes.get('durationInMillis', 0)
+                                track_number = attributes.get('trackNumber')
+                                is_explicit = attributes.get('contentRating') == 'explicit'
+
+                                # Convert duration from milliseconds to seconds
+                                duration_seconds = duration_ms // 1000 if duration_ms else None
+
+                                # Extract year from release date
+                                year = release_date[:4] if release_date and len(release_date) >= 4 else None
+
+                                # Split artist name into list
+                                artists = [artist.strip() for artist in artist_name.split(',') if artist.strip()]
+                                if not artists:
+                                    artists = [artist_name]
+
+                                print(f"Processing song: {song_name} by {artist_name} from {album_name}")
+
+                                # Try to get more detailed track info for better album information
+                                detailed_album_name = album_name
+                                detailed_album_artist = artist_name
+                                detailed_track_number = track_number
+
+                                try:
+                                    if song_id:
+                                        track_info = module.get_track_info(song_id)
+                                        if hasattr(track_info, 'album') and track_info.album:
+                                            detailed_album_name = track_info.album.name if hasattr(track_info.album,
+                                                                                                   'name') else album_name
+                                            detailed_album_artist = track_info.album.artist if hasattr(track_info.album,
+                                                                                                       'artist') else artist_name
+                                        if hasattr(track_info, 'track_number'):
+                                            detailed_track_number = track_info.track_number
+
+                                        print(f"Enhanced album info: {detailed_album_name} by {detailed_album_artist}")
+
+                                except Exception as e:
+                                    print(f"Could not get detailed track info for {song_name}: {e}")
+                                    # Use the basic info we already have
+                                    pass
+
+                                track_data = {
+                                    "id": song_id,
+                                    "name": song_name,
+                                    "artist": ', '.join(artists),
+                                    "album": detailed_album_name,
+                                    "album_artist": detailed_album_artist,
+                                    "duration": duration_seconds,
+                                    "track_number": detailed_track_number,
+                                    "year": year,
+                                    "explicit": is_explicit,
+                                    "url": self.get_platform_url(platform_name, 'track', song_id) if song_id else None,
+                                    "additional_info": None
+                                }
+
+                                all_tracks.append(track_data)
+                                print(f"Added track: {track_data['name']} - {track_data['album']}")
+
+                            except Exception as e:
+                                print(f"Error processing song data: {e}")
+                                print(f"Song data: {song_data}")
+                                continue
+
+                        total_fetched += len(songs)
+                        offset += len(songs)
+
+                        # If we got fewer results than requested, we've reached the end
+                        if len(songs) < current_limit:
+                            print("Reached end of results")
+                            break
+
+                    except Exception as e:
+                        print(f"Error fetching page at offset {offset}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        break
+
+                print(f"Total tracks fetched: {len(all_tracks)}")
+
+                # If group_by_album is True, we still return individual tracks
+                # but the frontend will group them by album
+                result_data = {
+                    "tracks": all_tracks,
+                    "pagination": {
+                        "current_page": page,
+                        "total_pages": 1,  # We don't have pagination info from Apple Music
+                        "total_results": len(all_tracks),
+                        "has_more": len(all_tracks) == limit  # Indicate if there might be more results
+                    },
+                    "grouped_by_album": group_by_album
+                }
+
+                return result_data
+
+            else:
+                # For Tidal and other platforms
+                print("Using Tidal with username/password authentication")
+
+                # Check if we already have an authenticated session
+                if not hasattr(module, 'session') or not module.session:
+                    print("No existing session found, attempting to authenticate...")
+
+                    # Try to authenticate
+                    success = await self.test_login(platform_name, username, password)
+                    if not success:
+                        raise Exception("Authentication failed. Please check your credentials.")
+
+                    # Reload the module to get the authenticated session
+                    module = self.orpheus.load_module(platform_name)
+
+                # Search for tracks
+                from utils.models import DownloadTypeEnum
+                search_results = module.search(
+                    query_type=DownloadTypeEnum.track,
+                    query=query,
+                    limit=limit
+                )
+
+                print(f"Found {len(search_results)} search results")
+
+                # Convert to our format
+                tracks = []
+                for result in search_results:
+                    track_data = {
+                        "id": result.result_id,
+                        "name": result.name,
+                        "artist": ', '.join(result.artists) if result.artists else 'Unknown Artist',
+                        "album": getattr(result, 'album', 'Unknown Album'),
+                        "duration": result.duration,
+                        "track_number": getattr(result, 'track_number', None),
+                        "year": result.year,
+                        "explicit": result.explicit,
+                        "url": self.get_platform_url(platform_name, 'track', result.result_id),
+                        "additional_info": result.additional[0] if result.additional else None
+                    }
+                    tracks.append(track_data)
+
+                # Group by album if requested
+                if group_by_album:
+                    tracks = self.group_tracks_by_album(tracks)
+
+                result_data = {
+                    "tracks": tracks,
+                    "pagination": {
+                        "current_page": page,
+                        "total_pages": 1,
+                        "total_results": len(tracks)
+                    },
+                    "grouped_by_album": group_by_album
+                }
+
+                return result_data
+
+        except Exception as e:
+            print(f"Search error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"Search failed: {e}")
+
+    async def search_albums(self, platform: str, query: str, username: str, password: str, limit: int = 10):
+        """Search for albums specifically WITHOUT loading tracklists"""
         try:
             # Normalize platform name
             platform_name = platform.lower()
@@ -113,7 +361,7 @@ class OrpheusManager:
 
             module = self.orpheus.load_module(platform_name)
 
-            # For Apple Music, check cookie authentication
+            # Use the same authentication check as the track search
             if platform_name == 'applemusic':
                 print("Using Apple Music with cookie authentication")
 
@@ -128,162 +376,6 @@ class OrpheusManager:
                 if not hasattr(module, 'session') or not module.session:
                     raise Exception("No authenticated session found. Please authenticate manually first.")
 
-            print(f"About to call search with: query_type=DownloadTypeEnum.track, query='{query}', limit={limit * 2}")
-
-            # Perform search exactly like orpheus.py CLI does
-            try:
-                # Use the same search limit as CLI (but get more results for pagination)
-                search_limit = limit * 2  # Get more results for pagination
-
-                # This is exactly what orpheus.py does:
-                items = module.search(query_type=DownloadTypeEnum.track, query=query, limit=search_limit)
-
-                print(f"Search completed successfully")
-                print(f"Search results type: {type(items)}")
-                print(f"Search results length: {len(items) if hasattr(items, '__len__') else 'N/A'}")
-
-                if len(items) == 0:
-                    print(f'No search results for track: {query}')
-                    return {
-                        "tracks": [],
-                        "pagination": {
-                            "current_page": page,
-                            "total_pages": 0,
-                            "total_results": 0,
-                            "has_next": False,
-                            "has_previous": False,
-                            "limit": limit
-                        }
-                    }
-
-            except Exception as search_error:
-                print(f"Search method failed: {search_error}")
-                print(f"Search traceback: {traceback.format_exc()}")
-                raise search_error
-
-            # Convert results to expected format - mimic what orpheus.py does
-            tracks = []
-
-            if isinstance(items, list):
-                print(f"Processing {len(items)} total search results")
-
-                for index, item in enumerate(items):
-                    try:
-                        # This mimics exactly what orpheus.py does with SearchResult objects
-                        if hasattr(item, 'result_id') and hasattr(item, 'name'):
-                            print(f"Processing SearchResult {index}: {item.name}")
-
-                            # Extract artist information - same logic as orpheus.py display
-                            if hasattr(item, 'artists') and item.artists:
-                                if isinstance(item.artists, list):
-                                    artists_str = ', '.join(item.artists)
-                                else:
-                                    artists_str = str(item.artists)
-                            else:
-                                artists_str = "Unknown Artist"
-
-                            # Get album info if available
-                            album_name = "Unknown Album"
-                            if hasattr(item, 'extra_kwargs') and item.extra_kwargs:
-                                raw_result = item.extra_kwargs.get('raw_result', {})
-                                if raw_result and 'attributes' in raw_result:
-                                    album_name = raw_result['attributes'].get('albumName', 'Unknown Album')
-
-                            # Build additional details string like orpheus.py does
-                            additional_details = []
-                            if hasattr(item, 'explicit') and item.explicit:
-                                additional_details.append('[E]')
-                            if hasattr(item, 'duration') and item.duration:
-                                # Convert duration to mm:ss format like orpheus.py
-                                minutes = item.duration // 60
-                                seconds = item.duration % 60
-                                additional_details.append(f'[{minutes:02d}m:{seconds:02d}s]')
-                            if hasattr(item, 'year') and item.year:
-                                additional_details.append(f'[{item.year}]')
-                            if hasattr(item, 'additional') and item.additional:
-                                additional_details.extend([f'[{i}]' for i in item.additional])
-
-                            additional_info = ' '.join(additional_details)
-
-                            # Generate platform-specific URL using the result_id (this is the key!)
-                            track_url = self.get_platform_url(platform_name, 'track', item.result_id)
-
-                            # Create track data structure
-                            track_data = {
-                                "id": item.result_id,  # This is the key - the actual ID for downloading
-                                "name": item.name,
-                                "artist": artists_str,
-                                "album": album_name,
-                                "duration": item.duration or 0,
-                                "year": item.year if hasattr(item, 'year') else None,
-                                "explicit": item.explicit if hasattr(item, 'explicit') else False,
-                                "additional_info": additional_info,
-                                "url": track_url,
-                                # Include extra_kwargs for download compatibility
-                                "extra_kwargs": item.extra_kwargs if hasattr(item, 'extra_kwargs') else {}
-                            }
-
-                            tracks.append(track_data)
-                            print(
-                                f"  Added track: {track_data['name']} by {track_data['artist']} (ID: {item.result_id})")
-
-                        else:
-                            print(f"  Result {index} missing required SearchResult attributes")
-
-                    except Exception as parse_error:
-                        print(f"Error parsing result {index}: {parse_error}")
-                        print(f"Parse error traceback: {traceback.format_exc()}")
-
-            else:
-                print(f"Unexpected search result format: {type(items)}")
-                raise Exception(f"Unexpected search result format: {type(items)}")
-
-            print(f"Final tracks count: {len(tracks)}")
-
-            # Apply pagination AFTER processing all tracks
-            total_results = len(tracks)
-            total_pages = (total_results + limit - 1) // limit if total_results > 0 else 0
-
-            # Calculate offset for this page
-            offset = (page - 1) * limit
-            paginated_tracks = tracks[offset:offset + limit]
-
-            print(
-                f"Pagination: page {page}, offset {offset}, showing {len(paginated_tracks)} of {total_results} tracks")
-
-            response = {
-                "tracks": paginated_tracks,
-                "pagination": {
-                    "current_page": page,
-                    "total_pages": total_pages,
-                    "total_results": total_results,
-                    "has_next": page < total_pages,
-                    "has_previous": page > 1,
-                    "limit": limit
-                }
-            }
-
-            # Add album grouping if requested
-            if group_by_album:
-                organized = self.group_tracks_by_album(paginated_tracks)
-                response["organized"] = organized
-
-            print(f"Final response: {len(response['tracks'])} tracks in response")
-            return response
-
-        except Exception as e:
-            print(f"Search error details: {e}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            raise Exception(f"Search failed on {platform}: {e}")
-
-    async def search_albums(self, platform: str, query: str, username: str, password: str, limit: int = 10):
-        """Search for albums specifically WITHOUT loading tracklists"""
-        try:
-            module = self.orpheus.load_module(platform.lower())
-
-            if not hasattr(module, 'session') or not module.session:
-                raise Exception("No authenticated session found. Please authenticate manually first.")
-
             print(f"Searching albums for: {query}")
 
             # Search for albums
@@ -292,19 +384,30 @@ class OrpheusManager:
             albums = []
             for result in album_results:
                 if hasattr(result, 'result_id'):
+                    # Extract artist information - same logic as track search
+                    if hasattr(result, 'artists') and result.artists:
+                        if isinstance(result.artists, list):
+                            artists_str = ', '.join(result.artists)
+                        else:
+                            artists_str = str(result.artists)
+                    else:
+                        artists_str = "Unknown Artist"
+
+                    # Generate platform-specific URL
+                    album_url = self.get_platform_url(platform_name, 'album', result.result_id)
+
                     album_data = {
                         "id": result.result_id,
                         "name": result.name,
-                        "artist": ", ".join(result.artists) if hasattr(result,
-                                                                       'artists') and result.artists else "Unknown Artist",
+                        "artist": artists_str,
                         "year": result.year if hasattr(result, 'year') else None,
                         "type": "album",
-                        "url": f"https://tidal.com/browse/album/{result.result_id}",
+                        "url": album_url,
                         "tracks_loaded": False  # Indicate tracks are not loaded yet
                     }
 
                     albums.append(album_data)
-                    print(f"Added album: {album_data['name']} (tracks not loaded)")
+                    print(f"Added album: {album_data['name']} by {album_data['artist']} (tracks not loaded)")
 
             # Return simple albums structure (no organized grouping for album search)
             return {"albums": albums}
@@ -314,87 +417,191 @@ class OrpheusManager:
             raise Exception(f"Album search failed on {platform}: {e}")
 
     async def get_album_tracks(self, platform: str, album_id: str, username: str, password: str):
-        """Load tracks for a specific album on demand"""
+        """Get tracks for a specific album"""
         try:
-            module = self.orpheus.load_module(platform.lower())
+            # Normalize platform name
+            platform_name = platform.lower()
+            if platform_name == 'apple':
+                platform_name = 'applemusic'
 
-            if not hasattr(module, 'session') or not module.session:
-                raise Exception("No authenticated session found. Please authenticate manually first.")
+            print(f"Loading tracks for album {album_id} on platform {platform_name}")
+            module = self.orpheus.load_module(platform_name)
 
-            print(f"Loading tracks for album: {album_id}")
+            if platform_name == 'applemusic':
+                print("Using Apple Music with cookie authentication")
 
-            # Get detailed album info with tracklist
-            album_info = module.get_album_info(album_id)
-            tracks = []
+                # Check if the module is properly authenticated
+                if not hasattr(module, 'is_authenticated') or not module.is_authenticated:
+                    raise Exception(
+                        "Apple Music module not authenticated. Please check your cookies.txt file in the /config folder.")
 
-            if hasattr(album_info, 'tracks') and album_info.tracks:
-                print(f"Album has {len(album_info.tracks)} tracks")
+                print("Apple Music authentication verified successfully")
 
-                # Set up quality and codec options for track info calls
-                quality_tier = QualityEnum.HIGH
-                codec_options = CodecOptions(
-                    proprietary_codecs=True,
-                    spatial_codecs=True
-                )
+                # First, try to get album info
+                try:
+                    album_info = module.get_album_info(album_id)
+                    print(f"Got album info: {type(album_info)}")
+                    print(f"Album info attributes: {dir(album_info) if album_info else 'None'}")
 
-                for idx, track_id in enumerate(album_info.tracks, 1):
-                    try:
-                        # Get detailed track info to get real track names
-                        track_info = module.get_track_info(track_id, quality_tier, codec_options)
+                    if not album_info:
+                        raise Exception("Album not found")
 
-                        # Extract real track name and info
-                        track_name = f"Track {idx}"  # Default fallback
-                        track_artist = "Unknown Artist"
-                        track_duration = 0
-                        track_explicit = False
+                    tracks = []
 
-                        if track_info:
-                            if hasattr(track_info, 'name') and track_info.name:
-                                track_name = track_info.name
+                    # Check if album_info has tracks and they're populated
+                    if hasattr(album_info, 'tracks') and album_info.tracks:
+                        print(f"Found {len(album_info.tracks)} tracks in album info")
 
-                            if hasattr(track_info, 'artists') and track_info.artists:
-                                if isinstance(track_info.artists, list):
-                                    track_artist = ", ".join(track_info.artists)
-                                else:
-                                    track_artist = str(track_info.artists)
+                        # Check if the first track is a string (placeholder) or an object
+                        first_track = album_info.tracks[0]
+                        print(f"First track type: {type(first_track)}")
+                        print(f"First track value: {first_track}")
 
-                            if hasattr(track_info, 'duration') and track_info.duration:
-                                track_duration = track_info.duration
+                        if isinstance(first_track, str):
+                            print("Tracks are just placeholders (strings), not actual track objects")
+                            print("Apple Music cookie authentication doesn't provide individual track details")
 
-                            if hasattr(track_info, 'explicit'):
-                                track_explicit = track_info.explicit
+                            # Create placeholder tracks with basic info
+                            for i, track_placeholder in enumerate(album_info.tracks):
+                                track_data = {
+                                    "id": f"{album_id}_{i}",  # Create a pseudo-ID
+                                    "name": f"Track {i + 1}",  # Generic name since we don't have real names
+                                    "artist": album_info.artist if hasattr(album_info, 'artist') else "Unknown Artist",
+                                    "album": album_info.name if hasattr(album_info, 'name') else "Unknown Album",
+                                    "duration": None,
+                                    "track_number": i + 1,
+                                    "year": album_info.release_year if hasattr(album_info, 'release_year') else None,
+                                    "explicit": False,  # We don't know this with cookie auth
+                                    "url": self.get_platform_url(platform_name, 'album', album_id)
+                                    # Use album URL since we don't have individual track URLs
+                                }
+                                tracks.append(track_data)
+                                print(f"Added placeholder track: {track_data['name']}")
 
-                        track_data = {
-                            "track_number": idx,
-                            "id": track_id,
-                            "name": track_name,
-                            "artist": track_artist,
-                            "duration": track_duration,
-                            "explicit": track_explicit,
-                            "url": f"https://tidal.com/browse/track/{track_id}"
-                        }
+                            # Return tracks with a message explaining the limitation
+                            return {
+                                "tracks": tracks,
+                                "message": "Individual track names not available with cookie authentication. Track numbers are shown instead. You can download the full album to get all tracks with proper names."
+                            }
 
-                        tracks.append(track_data)
-                        print(f"  Track {idx}: {track_name} by {track_artist}")
+                        else:
+                            # If tracks are actual objects, process them normally
+                            for i, track in enumerate(album_info.tracks):
+                                print(f"Track {i + 1}: {type(track)} - {dir(track) if track else 'None'}")
 
-                    except Exception as track_error:
-                        print(f"Error getting track info for {track_id}: {track_error}")
-                        # Add placeholder track with basic info
-                        tracks.append({
-                            "track_number": idx,
-                            "id": track_id,
-                            "name": f"Track {idx}",
-                            "artist": "Unknown Artist",
-                            "duration": 0,
-                            "explicit": False,
-                            "url": f"https://tidal.com/browse/track/{track_id}"
-                        })
+                                # Extract track information
+                                track_data = {
+                                    "id": track.id if hasattr(track, 'id') else str(i),
+                                    "name": track.name if hasattr(track, 'name') else f"Track {i + 1}",
+                                    "artist": track.artist if hasattr(track, 'artist') else album_info.artist,
+                                    "album": album_info.name if hasattr(album_info, 'name') else "Unknown Album",
+                                    "duration": track.duration if hasattr(track, 'duration') else None,
+                                    "track_number": track.track_number if hasattr(track, 'track_number') else (i + 1),
+                                    "year": album_info.release_year if hasattr(album_info, 'release_year') else None,
+                                    "explicit": track.explicit if hasattr(track, 'explicit') else False,
+                                    "url": self.get_platform_url(platform_name, 'track',
+                                                                 track.id if hasattr(track, 'id') else str(i))
+                                }
+                                tracks.append(track_data)
+                                print(f"Added track: {track_data['name']}")
 
-            return {"tracks": tracks}
+                            return {"tracks": tracks}
+
+                    else:
+                        print("No tracks found in album info, trying search fallback...")
+
+                        # Try searching for tracks with the album name as fallback
+                        from utils.models import DownloadTypeEnum
+
+                        try:
+                            search_query = f"{album_info.name} {album_info.artist}"
+                            print(f"Searching for tracks with query: {search_query}")
+
+                            search_results = module.search(
+                                query_type=DownloadTypeEnum.track,
+                                query=search_query,
+                                limit=100
+                            )
+
+                            print(f"Search returned {len(search_results)} results")
+
+                            # Filter results to only include tracks from this album
+                            for result in search_results:
+                                print(f"Search result: {result.name} - Album: {getattr(result, 'album', 'N/A')}")
+                                # Check if this track belongs to our album
+                                if hasattr(result, 'album') and result.album and album_info.name in result.album:
+                                    track_data = {
+                                        "id": result.result_id,
+                                        "name": result.name,
+                                        "artist": result.artist if hasattr(result, 'artist') else album_info.artist,
+                                        "album": result.album,
+                                        "duration": result.duration if hasattr(result, 'duration') else None,
+                                        "track_number": result.track_number if hasattr(result,
+                                                                                       'track_number') else None,
+                                        "year": album_info.release_year if hasattr(album_info,
+                                                                                   'release_year') else None,
+                                        "explicit": result.explicit if hasattr(result, 'explicit') else False,
+                                        "url": self.get_platform_url(platform_name, 'track', result.result_id)
+                                    }
+                                    tracks.append(track_data)
+                                    print(f"Added track from search: {track_data['name']}")
+
+                            if tracks:
+                                return {"tracks": tracks}
+                            else:
+                                # If no tracks found via search, return message
+                                return {
+                                    "tracks": [],
+                                    "message": "Individual track listing not available with cookie authentication. You can download the full album instead."
+                                }
+
+                        except Exception as search_error:
+                            print(f"Search fallback failed: {search_error}")
+                            # If search fails, create a message explaining the limitation
+                            return {
+                                "tracks": [],
+                                "message": "Individual track listing not available with cookie authentication. You can download the full album instead."
+                            }
+
+                except Exception as e:
+                    print(f"Error getting album info: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise Exception(f"Failed to get album tracks: {e}")
+
+            else:
+                # For other platforms like Tidal, use existing implementation
+                print("Using Tidal implementation")
+                if not hasattr(module, 'session') or not module.session:
+                    raise Exception("No authenticated session found. Please authenticate manually first.")
+
+                # Get tracks for the album
+                album_tracks = module.tidal_api.get_album_tracks(album_id)
+
+                tracks = []
+                for track in album_tracks.get('items', []):
+                    track_data = {
+                        "id": track['id'],
+                        "name": track['title'],
+                        "artist": ', '.join([artist['name'] for artist in track.get('artists', [])]),
+                        "album": track.get('album', {}).get('title', 'Unknown Album'),
+                        "duration": track.get('duration'),
+                        "track_number": track.get('trackNumber'),
+                        "year": track.get('album', {}).get('releaseDate', '').split('-')[0] if track.get('album',
+                                                                                                         {}).get(
+                            'releaseDate') else None,
+                        "explicit": track.get('explicit', False),
+                        "url": self.get_platform_url(platform_name, 'track', track['id'])
+                    }
+                    tracks.append(track_data)
+
+                return {"tracks": tracks}
 
         except Exception as e:
-            print(f"Error loading album tracks: {e}")
-            raise Exception(f"Failed to load album tracks: {e}")
+            print(f"Album tracks loading error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"Failed to load album tracks from {platform}: {e}")
 
     async def download_track(self, platform: str, track_url: str):
         """Download track using orpheus.py script"""

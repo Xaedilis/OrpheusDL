@@ -28,13 +28,13 @@
                 <br><small>No username/password required for Apple Music.</small>
             </div>
         </div>
-        <div class="form-group">
-            <label for="searchType">Search Type:</label>
-            <select id="searchType">
-                <option value="tracks">Tracks</option>
-                <option value="albums">Albums</option>
-            </select>
-        </div>
+<div class="form-group" id="searchTypeGroup">
+    <label for="searchType">Search Type:</label>
+    <select id="searchType" name="searchType">
+        <option value="tracks">Tracks</option>
+        <option value="albums">Albums</option>
+    </select>
+</div>
         <div class="form-group">
             <label for="limit">Limit:</label>
             <input type="number" id="limit" value="10" min="1" max="50">

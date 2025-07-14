@@ -301,3 +301,72 @@ button:disabled {
 .download-btn:hover {
     background-color: #45a049;
 }
+/* Add these styles to your existing styles.css */
+
+.album-item {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    background-color: #f8f9fa;
+    transition: box-shadow 0.2s;
+}
+
+.album-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.track-item {
+    background-color: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 5px 0;
+    margin-left: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tracks-container {
+    margin-top: 15px;
+    display: none;
+}
+
+.tracks-container h4 {
+    margin: 10px 0;
+    color: #495057;
+    font-size: 16px;
+}
+
+.load-tracks-btn {
+    background-color: #17a2b8;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 10px;
+}
+
+.load-tracks-btn:hover {
+    background-color: #138496;
+}
+
+.load-tracks-btn:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.result-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
