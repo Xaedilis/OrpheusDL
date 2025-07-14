@@ -8,11 +8,11 @@ import json
 from urllib.parse import urlparse
 from orpheus.core import *
 from orpheus.music_downloader import beauty_format_seconds
-try:
-    from modules.spotify.spotify_api import SpotifyAuthError, SpotifyRateLimitDetectedError
-except ModuleNotFoundError:
-    SpotifyAuthError = None  # type: ignore
-    SpotifyRateLimitDetectedError = None  # type: ignore
+# try:
+#     from modules.spotify.spotify_api import SpotifyAuthError, SpotifyRateLimitDetectedError
+# except ModuleNotFoundError:
+#     SpotifyAuthError = None  # type: ignore
+#     SpotifyRateLimitDetectedError = None  # type: ignore
 
 def setup_ffmpeg_path():
     """Setup FFmpeg path from settings.json to match GUI behavior"""
@@ -294,10 +294,10 @@ if __name__ == "__main__":
         exit()
     # Specific handling for SpotifyAuthError, only if it was successfully imported
     except Exception as e:
-        if SpotifyAuthError is not None and isinstance(e, SpotifyAuthError):
-            print(f'\nSpotify Authentication Error: {e}')
-            print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')
-            exit(1) # Exit with a non-zero code to indicate an error
+        #if SpotifyAuthError is not None and isinstance(e, SpotifyAuthError):
+        #   print(f'\nSpotify Authentication Error: {e}')
+        #   print('Please try the command again. If the issue persists, you may need to check your Spotify credentials or network connection.')
+        #    exit(1) # Exit with a non-zero code to indicate an error
         # Catch-all for other exceptions
         # For general exceptions, print the traceback if it's useful for debugging.
         # For a cleaner user experience for non-dev users, you might choose to print a simpler message.
