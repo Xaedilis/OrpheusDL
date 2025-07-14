@@ -7,4 +7,5 @@ config/
 downloads/
 temp/
 .python-version
+modules/
 extensions/
