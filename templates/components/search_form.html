@@ -10,16 +10,23 @@
             <select id="platform" required>
                 <option value="tidal">Tidal</option>
                 <option value="spotify">Spotify</option>
-                <option value="apple">Apple Music</option>
+                <option value="applemusic">Apple Music</option>
             </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="usernameGroup">
             <label for="username">Username:</label>
             <input type="text" id="username" required>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="passwordGroup">
             <label for="password">Password:</label>
             <input type="password" id="password" required>
+        </div>
+        <div class="form-group" id="cookieNotice" style="display: none;">
+            <div class="cookie-notice">
+                <strong>Apple Music Authentication:</strong> 
+                This platform uses cookie-based authentication. Make sure you have placed your <code>cookies.txt</code> file in the <code>/config</code> folder.
+                <br><small>No username/password required for Apple Music.</small>
+            </div>
         </div>
         <div class="form-group">
             <label for="searchType">Search Type:</label>

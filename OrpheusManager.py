@@ -79,98 +79,170 @@ class OrpheusManager:
 
         return organized
 
+    def get_platform_url(self, platform: str, media_type: str, media_id: str) -> str:
+        """Generate platform-specific URLs that match what orpheus.py expects"""
+        url_patterns = {
+            'tidal': {
+                'track': f"https://tidal.com/browse/track/{media_id}",
+                'album': f"https://tidal.com/browse/album/{media_id}",
+                'playlist': f"https://tidal.com/browse/playlist/{media_id}"
+            },
+            'applemusic': {
+                # Apple Music URLs should include the full path structure
+                'track': f"https://music.apple.com/us/song/{media_id}",
+                'album': f"https://music.apple.com/us/album/{media_id}",
+                'playlist': f"https://music.apple.com/us/playlist/{media_id}"
+            },
+            'spotify': {
+                'track': f"https://open.spotify.com/track/{media_id}",
+                'album': f"https://open.spotify.com/album/{media_id}",
+                'playlist': f"https://open.spotify.com/playlist/{media_id}"
+            }
+        }
+
+        return url_patterns.get(platform, {}).get(media_type, f"#{media_id}")
+
     async def search_with_credentials(self, platform: str, query: str, username: str, password: str,
                                       page: int = 1, limit: int = 20, group_by_album: bool = False):
-        """Search using provided credentials with pagination and grouping"""
+        """Search using provided credentials with pagination and grouping - mimics orpheus.py CLI behavior"""
         try:
-            module = self.orpheus.load_module(platform.lower())
+            # Normalize platform name
+            platform_name = platform.lower()
+            if platform_name == 'apple':
+                platform_name = 'applemusic'
 
-            # Check if module has an active session
-            if not hasattr(module, 'session') or not module.session:
-                raise Exception("No authenticated session found. Please authenticate manually first.")
+            module = self.orpheus.load_module(platform_name)
 
-            print(
-                f"About to call search with: query_type=DownloadTypeEnum.track, query='{query}', limit={limit * 3}, page={page}")
+            # For Apple Music, check cookie authentication
+            if platform_name == 'applemusic':
+                print("Using Apple Music with cookie authentication")
 
-            # Perform search with proper enum - request more results for pagination
+                # Check if the module is properly authenticated
+                if not hasattr(module, 'is_authenticated') or not module.is_authenticated:
+                    raise Exception(
+                        "Apple Music module not authenticated. Please check your cookies.txt file in the /config folder.")
+
+                print("Apple Music authentication verified successfully")
+            else:
+                # Check if module has an active session for other platforms
+                if not hasattr(module, 'session') or not module.session:
+                    raise Exception("No authenticated session found. Please authenticate manually first.")
+
+            print(f"About to call search with: query_type=DownloadTypeEnum.track, query='{query}', limit={limit * 2}")
+
+            # Perform search exactly like orpheus.py CLI does
             try:
-                # Request more results to enable proper pagination
-                search_limit = limit * 5  # Get 5x more results for better pagination
-                search_results = module.search(query_type=DownloadTypeEnum.track, query=query, limit=search_limit)
+                # Use the same search limit as CLI (but get more results for pagination)
+                search_limit = limit * 2  # Get more results for pagination
+
+                # This is exactly what orpheus.py does:
+                items = module.search(query_type=DownloadTypeEnum.track, query=query, limit=search_limit)
+
                 print(f"Search completed successfully")
-                print(f"Search results type: {type(search_results)}")
-                print(f"Search results length: {len(search_results) if hasattr(search_results, '__len__') else 'N/A'}")
+                print(f"Search results type: {type(items)}")
+                print(f"Search results length: {len(items) if hasattr(items, '__len__') else 'N/A'}")
+
+                if len(items) == 0:
+                    print(f'No search results for track: {query}')
+                    return {
+                        "tracks": [],
+                        "pagination": {
+                            "current_page": page,
+                            "total_pages": 0,
+                            "total_results": 0,
+                            "has_next": False,
+                            "has_previous": False,
+                            "limit": limit
+                        }
+                    }
 
             except Exception as search_error:
                 print(f"Search method failed: {search_error}")
                 print(f"Search traceback: {traceback.format_exc()}")
                 raise search_error
 
-            # Convert results to expected format
+            # Convert results to expected format - mimic what orpheus.py does
             tracks = []
 
-            if isinstance(search_results, list):
-                print(f"Processing {len(search_results)} total search results")
+            if isinstance(items, list):
+                print(f"Processing {len(items)} total search results")
 
-                for i, result in enumerate(search_results):
+                for index, item in enumerate(items):
                     try:
-                        # Handle SearchResult objects (from utils.models)
-                        if hasattr(result, 'result_id') and hasattr(result, 'name') and hasattr(result, 'artists'):
-                            # Format artists properly
-                            artists_str = ", ".join(result.artists) if isinstance(result.artists, list) else str(
-                                result.artists)
+                        # This mimics exactly what orpheus.py does with SearchResult objects
+                        if hasattr(item, 'result_id') and hasattr(item, 'name'):
+                            print(f"Processing SearchResult {index}: {item.name}")
 
-                            # Try to get real album name by fetching track info
-                            album_name = getattr(result, 'album_name', None) or getattr(result, 'album', None)
+                            # Extract artist information - same logic as orpheus.py display
+                            if hasattr(item, 'artists') and item.artists:
+                                if isinstance(item.artists, list):
+                                    artists_str = ', '.join(item.artists)
+                                else:
+                                    artists_str = str(item.artists)
+                            else:
+                                artists_str = "Unknown Artist"
 
-                            # If still no album name, try to get it from track info
-                            if not album_name or album_name in ['Unknown Album', 'Unknown', '']:
-                                try:
-                                    real_album_name = await self.get_track_album_info(module, result.result_id)
-                                    if real_album_name:
-                                        album_name = real_album_name
-                                except Exception as album_error:
-                                    print(f"Error getting real album name: {album_error}")
+                            # Get album info if available
+                            album_name = "Unknown Album"
+                            if hasattr(item, 'extra_kwargs') and item.extra_kwargs:
+                                raw_result = item.extra_kwargs.get('raw_result', {})
+                                if raw_result and 'attributes' in raw_result:
+                                    album_name = raw_result['attributes'].get('albumName', 'Unknown Album')
 
-                            # Fallback to a reasonable default
-                            if not album_name or album_name in ['Unknown Album', 'Unknown', '']:
-                                album_name = 'Single'
+                            # Build additional details string like orpheus.py does
+                            additional_details = []
+                            if hasattr(item, 'explicit') and item.explicit:
+                                additional_details.append('[E]')
+                            if hasattr(item, 'duration') and item.duration:
+                                # Convert duration to mm:ss format like orpheus.py
+                                minutes = item.duration // 60
+                                seconds = item.duration % 60
+                                additional_details.append(f'[{minutes:02d}m:{seconds:02d}s]')
+                            if hasattr(item, 'year') and item.year:
+                                additional_details.append(f'[{item.year}]')
+                            if hasattr(item, 'additional') and item.additional:
+                                additional_details.extend([f'[{i}]' for i in item.additional])
 
+                            additional_info = ' '.join(additional_details)
+
+                            # Generate platform-specific URL using the result_id (this is the key!)
+                            track_url = self.get_platform_url(platform_name, 'track', item.result_id)
+
+                            # Create track data structure
                             track_data = {
-                                "id": result.result_id,
-                                "name": result.name,
+                                "id": item.result_id,  # This is the key - the actual ID for downloading
+                                "name": item.name,
                                 "artist": artists_str,
                                 "album": album_name,
-                                "duration": result.duration or 0,
-                                "year": result.year,
-                                "explicit": result.explicit,
-                                "quality": result.additional[0] if result.additional else "Standard",
-                                "url": f"https://tidal.com/browse/track/{result.result_id}"
+                                "duration": item.duration or 0,
+                                "year": item.year if hasattr(item, 'year') else None,
+                                "explicit": item.explicit if hasattr(item, 'explicit') else False,
+                                "additional_info": additional_info,
+                                "url": track_url,
+                                # Include extra_kwargs for download compatibility
+                                "extra_kwargs": item.extra_kwargs if hasattr(item, 'extra_kwargs') else {}
                             }
 
                             tracks.append(track_data)
+                            print(
+                                f"  Added track: {track_data['name']} by {track_data['artist']} (ID: {item.result_id})")
 
                         else:
-                            # Fallback handling for other formats
-                            fallback_track = {
-                                "id": getattr(result, 'result_id', str(i)),
-                                "name": getattr(result, 'name', f"Track {i + 1}"),
-                                "artist": "Unknown Artist",
-                                "album": "Unknown Album",
-                                "duration": 0,
-                                "url": f"https://tidal.com/browse/track/{getattr(result, 'result_id', str(i))}"
-                            }
-                            tracks.append(fallback_track)
+                            print(f"  Result {index} missing required SearchResult attributes")
+
                     except Exception as parse_error:
-                        print(f"Error parsing result {i}: {parse_error}")
+                        print(f"Error parsing result {index}: {parse_error}")
+                        print(f"Parse error traceback: {traceback.format_exc()}")
 
             else:
-                print(f"Unexpected search result format: {type(search_results)}")
-                raise Exception(f"Unexpected search result format: {type(search_results)}")
+                print(f"Unexpected search result format: {type(items)}")
+                raise Exception(f"Unexpected search result format: {type(items)}")
+
+            print(f"Final tracks count: {len(tracks)}")
 
             # Apply pagination AFTER processing all tracks
             total_results = len(tracks)
-            total_pages = (total_results + limit - 1) // limit
+            total_pages = (total_results + limit - 1) // limit if total_results > 0 else 0
 
             # Calculate offset for this page
             offset = (page - 1) * limit
@@ -196,12 +268,7 @@ class OrpheusManager:
                 organized = self.group_tracks_by_album(paginated_tracks)
                 response["organized"] = organized
 
-                print(f"Organized results:")
-                print(f"  Albums ({len(organized['albums'])}): {list(organized['albums'].keys())}")
-                print(f"  Singles: {len(organized['singles'])}")
-
-            print(f"Final response: page {page}/{total_pages}, {len(paginated_tracks)} tracks shown")
-
+            print(f"Final response: {len(response['tracks'])} tracks in response")
             return response
 
         except Exception as e:
